@@ -1,9 +1,9 @@
 name: anyrouter-status-check
 
 on:
-  # schedule:
-  #   - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
   workflow_dispatch:
+  schedule:
+    - cron: "2,12,22,32,42,52 * * * *"
 
 concurrency:
   group: anyrouter-status-check
@@ -11,10 +11,16 @@ concurrency:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
-  probe:
+  probe-and-deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Probe and publish data
+      - name: Probe and persist data
         env:
           ANYROUTER_API_BASE: ${{ secrets.ANYROUTER_API_BASE }}
           ANYROUTER_API_KEY: ${{ secrets.ANYROUTER_API_KEY }}
@@ -54,19 +60,33 @@ jobs:
             git add docs/data/status.json docs/data/history.json
             if git diff --cached --quiet; then
               echo "No data changes to commit"
-              exit 0
+              break
             fi
 
             git commit -m "chore(status): refresh anyrouter probe data"
 
             if git push origin HEAD:main; then
               echo "Publish succeeded"
-              exit 0
+              break
             fi
 
             echo "Push failed; retrying on top of the latest origin/main"
             attempt=$((attempt + 1))
           done
 
-          echo "Failed to publish data after $max_attempts attempts" >&2
-          exit 1
+          if [ "$attempt" -gt "$max_attempts" ]; then
+            echo "Failed to publish data after $max_attempts attempts" >&2
+            exit 1
+          fi
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
