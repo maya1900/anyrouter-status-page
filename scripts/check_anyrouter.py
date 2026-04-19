@@ -318,6 +318,21 @@ def parse_bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def parse_optional_float(value: Optional[str]) -> Optional[float]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    cleaned = cleaned.replace(",", "")
+    if cleaned.startswith("$"):
+        cleaned = cleaned[1:].strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
 def derive_console_base(api_base: str) -> str:
     parsed = urlparse(api_base)
     if parsed.scheme and parsed.netloc:
@@ -772,7 +787,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--console-quota-per-unit",
         type=float,
-        default=float(os.environ["ANYROUTER_CONSOLE_QUOTA_PER_UNIT"]) if os.environ.get("ANYROUTER_CONSOLE_QUOTA_PER_UNIT") else None,
+        default=parse_optional_float(os.environ.get("ANYROUTER_CONSOLE_QUOTA_PER_UNIT")),
         help="Quota conversion rate used by console UI",
     )
     parser.add_argument(
