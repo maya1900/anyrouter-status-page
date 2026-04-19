@@ -47,6 +47,7 @@ body {
 
 h1,
 h2,
+h3,
 p {
   margin: 0;
 }
@@ -202,6 +203,28 @@ h1 {
 .detail-list {
   display: grid;
   gap: 12px;
+}
+
+.subsection {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.subsection-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: baseline;
+  margin-bottom: 16px;
+}
+
+.subsection-header h3 {
+  font-size: 18px;
+}
+
+.account-metrics {
+  margin-bottom: 12px;
 }
 
 code {

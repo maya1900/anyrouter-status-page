@@ -17,6 +17,11 @@
   - 是否成功吐出文本
   - 最近错误消息
   - 最近探测耗时
+- 可选展示控制台账户额度
+  - 当前余额
+  - 历史消耗
+  - 请求次数
+  - 采集失败时会直接显示错误
 - 页面会额外标记数据是否过期
   - 超过 20 分钟未刷新，直接提示“当前页面不可信”
 - 只保留最近 7 天，按小时聚合
@@ -34,6 +39,12 @@
    - `ANYROUTER_API_BASE`
    - `ANYROUTER_API_KEY`
    - `ANYROUTER_MODEL`（推荐：`claude-opus-4-7[1m]`）
+   - 如果还要显示后台余额/消耗，再额外填：
+     - `ANYROUTER_CONSOLE_BASE`
+     - `ANYROUTER_CONSOLE_SESSION`
+     - `ANYROUTER_CONSOLE_USER_ID`
+     - `ANYROUTER_CONSOLE_QUOTA_PER_UNIT`（可选）
+     - `ANYROUTER_CONSOLE_DISPLAY_IN_CURRENCY`（可选，`true/false`）
 
 3. 安装依赖：
 
@@ -65,6 +76,12 @@
    - `ANYROUTER_API_BASE`
    - `ANYROUTER_API_KEY`
    - `ANYROUTER_MODEL`
+   - 如果要展示余额/消耗，再加：
+     - `ANYROUTER_CONSOLE_BASE`
+     - `ANYROUTER_CONSOLE_SESSION`
+     - `ANYROUTER_CONSOLE_USER_ID`
+     - `ANYROUTER_CONSOLE_QUOTA_PER_UNIT`（可选）
+     - `ANYROUTER_CONSOLE_DISPLAY_IN_CURRENCY`（可选）
 3. 启用 Actions
 4. 使用 Cloudflare Worker 定时触发该 workflow 的 `repository_dispatch`
    - 当前线上配置为每 10 分钟触发一次
@@ -189,6 +206,33 @@ Worker 每次跑的时候会调用 GitHub：
 - GitHub Actions 自带定时任务并不总是准点，所以这个项目把“过期数据”单独标红，避免旧数据冒充实时状态。
 - README 里提到的外部定时触发，推荐走 `repository_dispatch`，不要再拿 `workflow_dispatch` 当主要自动化入口。
 - 探测失败时脚本仍会写入状态文件；只有缺少配置或写文件失败时才会退出非零。
+- 控制台额度采集是可选功能，不影响原有 CLI 探针。
+- 控制台额度采集依赖网页登录态：
+  - `ANYROUTER_CONSOLE_SESSION` = 浏览器里 `anyrouter.top` 的 `session` Cookie 值
+  - `ANYROUTER_CONSOLE_USER_ID` = 浏览器控制台执行 `JSON.parse(localStorage.getItem("user")).id`
+- 这两个值缺一不可；缺少时页面会显示“未配置”，不会影响主状态探针。
+- `ANYROUTER_CONSOLE_SESSION` 本质上是登录态，失效后需要重新更新 Secret。
+- 如果你想把余额显示成 `$` 而不是原始 quota：
+  - 填 `ANYROUTER_CONSOLE_QUOTA_PER_UNIT`
+  - 再把 `ANYROUTER_CONSOLE_DISPLAY_IN_CURRENCY=true`
+
+## 控制台额度采集
+
+状态页新增的是“账户额度”区块，数据来源不是 OpenAI 兼容 API，而是 AnyRouter 后台自己的 Web API：
+
+- `GET /api/user/self`
+
+这条接口需要两层鉴权：
+
+- `session` Cookie
+- `New-API-User: <user.id>` 请求头
+
+脚本已经内置了挑战页 `acw_sc__v2` 的自动计算逻辑，所以只要你把：
+
+- `ANYROUTER_CONSOLE_SESSION`
+- `ANYROUTER_CONSOLE_USER_ID`
+
+配好，workflow 跑的时候就会自动把余额和消耗写进 `docs/data/status.json`。
 
 ## Opus 4.7[1m] 兼容说明
 

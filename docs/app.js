@@ -76,6 +76,31 @@ function elapsedLabel(ms) {
   return ms == null ? "-" : `${ms} ms`;
 }
 
+function fmtNumber(value) {
+  if (value == null || value === "") return "-";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value);
+  return new Intl.NumberFormat("zh-CN").format(num);
+}
+
+function fmtQuota(value, status) {
+  if (value == null || value === "") return "-";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value);
+
+  const quotaPerUnit = Number(status.console_quota_per_unit);
+  const canConvert = Number.isFinite(quotaPerUnit) && quotaPerUnit > 0;
+  if (!canConvert) {
+    return `${fmtNumber(num)} quota`;
+  }
+
+  const money = (num / quotaPerUnit).toFixed(2);
+  if (status.console_display_in_currency) {
+    return `$${money} (${fmtNumber(num)} quota)`;
+  }
+  return `${fmtNumber(num)} quota (~$${money})`;
+}
+
 function ageInfo(status) {
   if (!status.checked_at) return { isStale: true, severity: "major_outage", text: "监控数据缺失" };
   const checkedAt = new Date(status.checked_at);
@@ -120,6 +145,32 @@ function fillStatus(status) {
   setText("targetModel", status.target_model || "-");
   setText("lastToken", status.last_token || "-");
   setText("errorMessage", status.error_message || "-");
+  fillConsoleStats(status);
+}
+
+function fillConsoleStats(status) {
+  const consoleStatus = status.console_stats_status || "disabled";
+  const checkedAt = status.console_checked_at ? `Last fetched: ${fmtDate(status.console_checked_at)}` : "未配置";
+
+  setText("consoleCheckedAt", checkedAt);
+  setText("consoleBalance", fmtQuota(status.console_user_quota, status));
+  setText("consoleUsedQuota", fmtQuota(status.console_user_used_quota, status));
+  setText("consoleRequestCount", fmtNumber(status.console_user_request_count));
+
+  if (consoleStatus === "ok") {
+    setText("consoleStatsStatus", "已连接");
+    setText("consoleErrorMessage", "-");
+    return;
+  }
+
+  if (consoleStatus === "error") {
+    setText("consoleStatsStatus", "失败");
+    setText("consoleErrorMessage", status.console_error_message || "-");
+    return;
+  }
+
+  setText("consoleStatsStatus", "未配置");
+  setText("consoleErrorMessage", status.console_error_message || "未提供 console session / user id");
 }
 
 function bucketTooltip(bucket) {

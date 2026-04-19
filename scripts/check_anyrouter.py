@@ -16,6 +16,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
+
+import requests
 
 
 CC_BILLING_HEADER = "x-anthropic-billing-header: cc_version=2.1.114.6e1; cc_entrypoint=sdk-cli; cch=00000;"
@@ -268,6 +271,14 @@ def default_status() -> Dict[str, Any]:
         "raw_error_type": None,
         "target_model": None,
         "stale_after_seconds": STALE_AFTER_SECONDS,
+        "console_stats_status": "disabled",
+        "console_checked_at": None,
+        "console_error_message": "",
+        "console_user_quota": None,
+        "console_user_used_quota": None,
+        "console_user_request_count": None,
+        "console_quota_per_unit": None,
+        "console_display_in_currency": False,
     }
 
 
@@ -301,6 +312,144 @@ def load_json(path: Path, fallback: Dict[str, Any]) -> Dict[str, Any]:
 def write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def parse_bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def derive_console_base(api_base: str) -> str:
+    parsed = urlparse(api_base)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return api_base.rstrip("/")
+
+
+def solve_acw_sc_v2(challenge_html: str) -> Optional[str]:
+    match = re.search(r"<script>([\s\S]*?)</script>", challenge_html, re.IGNORECASE)
+    if not match:
+        return None
+
+    node_bin = shutil.which("node")
+    if not node_bin:
+        return None
+
+    with tempfile.TemporaryDirectory(prefix="anyrouter-acw-") as tmpdir:
+        script_path = Path(tmpdir) / "challenge.js"
+        script_path.write_text(match.group(1), encoding="utf-8")
+        runner = f"""
+const fs = require("fs");
+const vm = require("vm");
+const script = fs.readFileSync({json.dumps(str(script_path))}, "utf8");
+let cookie = "";
+const sandbox = {{
+  document: {{
+    set cookie(v) {{ cookie = v; }},
+    get cookie() {{ return cookie; }},
+    location: {{ reload() {{}} }},
+  }},
+  Date,
+  RegExp,
+  parseInt,
+  console,
+  setTimeout,
+  clearTimeout,
+  setInterval,
+  clearInterval,
+}};
+vm.createContext(sandbox);
+vm.runInContext(script, sandbox, {{ timeout: 5000 }});
+process.stdout.write(cookie);
+"""
+        try:
+            output = subprocess.check_output([node_bin, "-e", runner], text=True, timeout=10)
+        except Exception:
+            return None
+
+    cookie_match = re.search(r"acw_sc__v2=([^;]+)", output)
+    return cookie_match.group(1) if cookie_match else None
+
+
+def fetch_console_user_self(console_base: str, session_cookie: str, user_id: int, timeout: int) -> Dict[str, Any]:
+    result = {
+        "console_stats_status": "error",
+        "console_checked_at": iso_z(utc_now()),
+        "console_error_message": "",
+        "console_user_quota": None,
+        "console_user_used_quota": None,
+        "console_user_request_count": None,
+    }
+
+    common_headers = {
+        "user-agent": "Mozilla/5.0",
+        "accept": "application/json, text/plain, */*",
+    }
+    session = requests.Session()
+    session.headers.update(common_headers)
+    session.cookies.set("session", session_cookie, domain=urlparse(console_base).hostname or "", path="/")
+    try:
+        challenge_response = session.get(f"{console_base.rstrip('/')}/console", timeout=timeout)
+        challenge_html = challenge_response.text
+    except Exception as exc:
+        result["console_error_message"] = f"Console bootstrap failed: {type(exc).__name__}: {exc}"
+        return result
+
+    acw_cookie = solve_acw_sc_v2(challenge_html)
+    if acw_cookie:
+        session.cookies.set("acw_sc__v2", acw_cookie, domain=urlparse(console_base).hostname or "", path="/")
+    try:
+        session.get(f"{console_base.rstrip('/')}/console", timeout=timeout)
+    except Exception:
+        pass
+    try:
+        response = session.get(
+            f"{console_base.rstrip('/')}/api/user/self",
+            headers={"New-API-User": str(user_id)},
+            timeout=timeout,
+        )
+        body_text = response.text
+    except Exception as exc:
+        result["console_error_message"] = f"Console API failed: {type(exc).__name__}: {exc}"
+        return result
+
+    if response.status_code != 200:
+        message, _ = parse_error_payload(response.status_code, body_text)
+        result["console_error_message"] = message
+        return result
+
+    try:
+        payload = json.loads(body_text)
+    except ValueError as exc:
+        result["console_error_message"] = f"Console JSON invalid: {exc}"
+        return result
+
+    if not payload.get("success") or not isinstance(payload.get("data"), dict):
+        result["console_error_message"] = str(payload.get("message") or "Console API returned no data")
+        return result
+
+    data = payload["data"]
+    result["console_stats_status"] = "ok"
+    result["console_user_quota"] = data.get("quota")
+    result["console_user_used_quota"] = data.get("used_quota")
+    result["console_user_request_count"] = data.get("request_count")
+    result["console_error_message"] = ""
+    return result
+
+
+def enrich_console_stats(
+    snapshot: Dict[str, Any],
+    console_base: str,
+    session_cookie: str,
+    user_id: int,
+    timeout: int,
+    quota_per_unit: Optional[float],
+    display_in_currency: bool,
+) -> Dict[str, Any]:
+    stats = fetch_console_user_self(console_base, session_cookie, user_id, timeout)
+    snapshot.update(stats)
+    snapshot["console_quota_per_unit"] = quota_per_unit
+    snapshot["console_display_in_currency"] = display_in_currency
+    return snapshot
 
 
 def run_claude_cli_probe(api_base: str, api_key: str, model: str, timeout: int, prompt: str, checked_at: str) -> Optional[Dict[str, Any]]:
@@ -533,26 +682,53 @@ def execute_probe(
     return result
 
 
-def run_probe(api_base: str, api_key: str, model: str, timeout: int, prompt: str) -> Dict[str, Any]:
+def run_probe(
+    api_base: str,
+    api_key: str,
+    model: str,
+    timeout: int,
+    prompt: str,
+    console_base: str,
+    console_session: str,
+    console_user_id: Optional[int],
+    console_quota_per_unit: Optional[float],
+    console_display_in_currency: bool,
+) -> Dict[str, Any]:
     checked_at = iso_z(utc_now())
     cli_status = run_claude_cli_probe(api_base, api_key, model, timeout, prompt, checked_at)
     if cli_status is not None:
-        return cli_status
+        snapshot = cli_status
+    else:
+        status = default_status()
+        status["checked_at"] = checked_at
+        status["target_model"] = model
 
-    status = default_status()
-    status["checked_at"] = checked_at
-    status["target_model"] = model
+        session_id, account_uuid, device_id = build_request_ids()
+        headers, clean_model = build_headers(api_key, model, session_id)
+        snapshot = execute_probe(
+            api_base,
+            headers,
+            build_cli_status_payload(clean_model, prompt, session_id, account_uuid, device_id),
+            status,
+            timeout,
+        )
 
-    session_id, account_uuid, device_id = build_request_ids()
-    headers, clean_model = build_headers(api_key, model, session_id)
-    status = execute_probe(
-        api_base,
-        headers,
-        build_cli_status_payload(clean_model, prompt, session_id, account_uuid, device_id),
-        status,
-        timeout,
-    )
-    return status
+    if console_session and console_user_id is not None:
+        return enrich_console_stats(
+            snapshot,
+            console_base,
+            console_session,
+            console_user_id,
+            timeout,
+            console_quota_per_unit,
+            console_display_in_currency,
+        )
+
+    snapshot["console_stats_status"] = "disabled"
+    snapshot["console_checked_at"] = snapshot["checked_at"]
+    snapshot["console_quota_per_unit"] = console_quota_per_unit
+    snapshot["console_display_in_currency"] = console_display_in_currency
+    return snapshot
 
 
 def parse_args() -> argparse.Namespace:
@@ -577,6 +753,34 @@ def parse_args() -> argparse.Namespace:
         default="Reply with exactly one visible character: A",
         help="Probe prompt",
     )
+    parser.add_argument(
+        "--console-base",
+        default=os.environ.get("ANYROUTER_CONSOLE_BASE", derive_console_base(os.environ.get("ANYROUTER_API_BASE", ""))),
+        help="Anyrouter console origin, e.g. https://anyrouter.top",
+    )
+    parser.add_argument(
+        "--console-session",
+        default=os.environ.get("ANYROUTER_CONSOLE_SESSION", ""),
+        help="Anyrouter console session cookie value",
+    )
+    parser.add_argument(
+        "--console-user-id",
+        type=int,
+        default=int(os.environ["ANYROUTER_CONSOLE_USER_ID"]) if os.environ.get("ANYROUTER_CONSOLE_USER_ID") else None,
+        help="Anyrouter console localStorage.user.id",
+    )
+    parser.add_argument(
+        "--console-quota-per-unit",
+        type=float,
+        default=float(os.environ["ANYROUTER_CONSOLE_QUOTA_PER_UNIT"]) if os.environ.get("ANYROUTER_CONSOLE_QUOTA_PER_UNIT") else None,
+        help="Quota conversion rate used by console UI",
+    )
+    parser.add_argument(
+        "--console-display-in-currency",
+        action="store_true",
+        default=parse_bool(os.environ.get("ANYROUTER_CONSOLE_DISPLAY_IN_CURRENCY", "false")),
+        help="Render console quota as currency when quota-per-unit is configured",
+    )
     parser.add_argument("--status-path", default=str(STATUS_PATH), help="status.json output path")
     parser.add_argument("--history-path", default=str(HISTORY_PATH), help="history.json output path")
     parser.add_argument("--print-json", action="store_true", help="Print the current snapshot to stdout")
@@ -592,7 +796,18 @@ def main() -> int:
         print("Missing ANYROUTER_API_KEY", file=sys.stderr)
         return 2
 
-    snapshot = run_probe(args.api_base, args.api_key, args.model, args.timeout, args.prompt)
+    snapshot = run_probe(
+        args.api_base,
+        args.api_key,
+        args.model,
+        args.timeout,
+        args.prompt,
+        args.console_base,
+        args.console_session,
+        args.console_user_id,
+        args.console_quota_per_unit,
+        args.console_display_in_currency,
+    )
     history = load_json(Path(args.history_path), default_history())
     merged_history = merge_history(history, snapshot)
 
