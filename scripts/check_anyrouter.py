@@ -27,6 +27,9 @@ WINDOW_HOURS = 24 * 7
 STALE_AFTER_SECONDS = 20 * 60
 CONSOLE_REFRESH_SECONDS = 60 * 60
 CONSOLE_QUOTA_PER_DOLLAR = 500_000
+SHANGHAI_TZ = timezone(timedelta(hours=8))
+CONSOLE_SIGNIN_HOUR = 8
+CONSOLE_SIGNIN_MINUTE = 30
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "docs" / "data"
 STATUS_PATH = DATA_DIR / "status.json"
@@ -262,7 +265,7 @@ def parse_error_payload(status_code: int, body_text: str) -> Tuple[str, Optional
 
 def default_status() -> Dict[str, Any]:
     return {
-        "service_name": "Anyrouter Claude CLI Status",
+        "service_name": "Anyrouter API Status",
         "overall_status": "no_data",
         "http_status": None,
         "token_ok": False,
@@ -281,6 +284,10 @@ def default_status() -> Dict[str, Any]:
         "console_user_request_count": None,
         "console_quota_per_dollar": CONSOLE_QUOTA_PER_DOLLAR,
         "console_refresh_seconds": CONSOLE_REFRESH_SECONDS,
+        "console_signin_status": "disabled",
+        "console_signin_checked_at": None,
+        "console_signin_last_success_at": None,
+        "console_signin_error_message": "",
     }
 
 
@@ -325,6 +332,15 @@ def derive_console_base(api_base: str) -> str:
     if parsed.scheme and parsed.netloc:
         return f"{parsed.scheme}://{parsed.netloc}"
     return api_base.rstrip("/")
+
+
+def shanghai_now() -> datetime:
+    return datetime.now(SHANGHAI_TZ)
+
+
+def console_signin_due(now_dt: Optional[datetime] = None) -> datetime:
+    current = now_dt.astimezone(SHANGHAI_TZ) if now_dt else shanghai_now()
+    return current.replace(hour=CONSOLE_SIGNIN_HOUR, minute=CONSOLE_SIGNIN_MINUTE, second=0, microsecond=0)
 
 
 def solve_acw_sc_v2(challenge_html: str) -> Optional[str]:
@@ -372,6 +388,25 @@ process.stdout.write(cookie);
     return cookie_match.group(1) if cookie_match else None
 
 
+def create_console_session(console_base: str, session_cookie: str) -> requests.Session:
+    common_headers = {
+        "user-agent": "Mozilla/5.0",
+        "accept": "application/json, text/plain, */*",
+    }
+    session = requests.Session()
+    session.headers.update(common_headers)
+    session.cookies.set("session", session_cookie, domain=urlparse(console_base).hostname or "", path="/")
+    return session
+
+
+def bootstrap_console_session(session: requests.Session, console_base: str, timeout: int) -> None:
+    challenge_response = session.get(f"{console_base.rstrip('/')}/console", timeout=timeout)
+    acw_cookie = solve_acw_sc_v2(challenge_response.text)
+    if acw_cookie:
+        session.cookies.set("acw_sc__v2", acw_cookie, domain=urlparse(console_base).hostname or "", path="/")
+    session.get(f"{console_base.rstrip('/')}/console", timeout=timeout)
+
+
 def fetch_console_user_self(console_base: str, session_cookie: str, user_id: int, timeout: int) -> Dict[str, Any]:
     result = {
         "console_stats_status": "error",
@@ -382,27 +417,12 @@ def fetch_console_user_self(console_base: str, session_cookie: str, user_id: int
         "console_user_request_count": None,
     }
 
-    common_headers = {
-        "user-agent": "Mozilla/5.0",
-        "accept": "application/json, text/plain, */*",
-    }
-    session = requests.Session()
-    session.headers.update(common_headers)
-    session.cookies.set("session", session_cookie, domain=urlparse(console_base).hostname or "", path="/")
+    session = create_console_session(console_base, session_cookie)
     try:
-        challenge_response = session.get(f"{console_base.rstrip('/')}/console", timeout=timeout)
-        challenge_html = challenge_response.text
+        bootstrap_console_session(session, console_base, timeout)
     except Exception as exc:
         result["console_error_message"] = f"Console bootstrap failed: {type(exc).__name__}: {exc}"
         return result
-
-    acw_cookie = solve_acw_sc_v2(challenge_html)
-    if acw_cookie:
-        session.cookies.set("acw_sc__v2", acw_cookie, domain=urlparse(console_base).hostname or "", path="/")
-    try:
-        session.get(f"{console_base.rstrip('/')}/console", timeout=timeout)
-    except Exception:
-        pass
     try:
         response = session.get(
             f"{console_base.rstrip('/')}/api/user/self",
@@ -449,6 +469,51 @@ def enrich_console_stats(
     snapshot.update(stats)
     snapshot["console_quota_per_dollar"] = CONSOLE_QUOTA_PER_DOLLAR
     snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
+    return snapshot
+
+
+def carry_console_signin(snapshot: Dict[str, Any], previous_status: Dict[str, Any]) -> Dict[str, Any]:
+    for key in [
+        "console_signin_status",
+        "console_signin_checked_at",
+        "console_signin_last_success_at",
+        "console_signin_error_message",
+    ]:
+        snapshot[key] = previous_status.get(key, snapshot.get(key))
+    return snapshot
+
+
+def should_run_console_signin(previous_status: Dict[str, Any], now_dt: Optional[datetime] = None) -> bool:
+    current = now_dt.astimezone(SHANGHAI_TZ) if now_dt else shanghai_now()
+    due_at = console_signin_due(current)
+    if current < due_at:
+        return False
+
+    last_success_at = previous_status.get("console_signin_last_success_at")
+    if not last_success_at:
+        return True
+    try:
+        success_dt = datetime.fromisoformat(str(last_success_at).replace("Z", "+00:00")).astimezone(SHANGHAI_TZ)
+    except Exception:
+        return True
+    return success_dt.date() != current.date()
+
+
+def run_console_signin(snapshot: Dict[str, Any], console_base: str, session_cookie: str, timeout: int) -> Dict[str, Any]:
+    checked_at = iso_z(utc_now())
+    snapshot["console_signin_checked_at"] = checked_at
+    snapshot["console_signin_error_message"] = ""
+
+    session = create_console_session(console_base, session_cookie)
+    try:
+        bootstrap_console_session(session, console_base, timeout)
+    except Exception as exc:
+        snapshot["console_signin_status"] = "error"
+        snapshot["console_signin_error_message"] = f"Console sign-in failed: {type(exc).__name__}: {exc}"
+        return snapshot
+
+    snapshot["console_signin_status"] = "ok"
+    snapshot["console_signin_last_success_at"] = checked_at
     return snapshot
 
 
@@ -629,6 +694,7 @@ def run_probe(
     previous_status: Dict[str, Any],
 ) -> Dict[str, Any]:
     checked_at = iso_z(utc_now())
+    current_local = shanghai_now()
     status = default_status()
     status["checked_at"] = checked_at
     status["target_model"] = model
@@ -643,21 +709,36 @@ def run_probe(
         timeout,
     )
 
-    if console_session and console_user_id is not None:
-        if not should_refresh_console(previous_status, snapshot["checked_at"]):
-            return carry_console_stats(snapshot, previous_status)
-        return enrich_console_stats(
-            snapshot,
-            console_base,
-            console_session,
-            console_user_id,
-            timeout,
-        )
+    if console_session:
+        if should_run_console_signin(previous_status, current_local):
+            snapshot = run_console_signin(snapshot, console_base, console_session, timeout)
+        else:
+            snapshot = carry_console_signin(snapshot, previous_status)
+            if snapshot.get("console_signin_status") == "disabled":
+                snapshot["console_signin_status"] = "waiting"
+                snapshot["console_signin_checked_at"] = snapshot["checked_at"]
+                snapshot["console_signin_error_message"] = ""
+
+        if console_user_id is not None:
+            if not should_refresh_console(previous_status, snapshot["checked_at"]):
+                return carry_console_stats(snapshot, previous_status)
+            return enrich_console_stats(snapshot, console_base, console_session, console_user_id, timeout)
+
+        snapshot["console_stats_status"] = "disabled"
+        snapshot["console_checked_at"] = snapshot["checked_at"]
+        snapshot["console_quota_per_dollar"] = CONSOLE_QUOTA_PER_DOLLAR
+        snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
+        snapshot["console_error_message"] = "未提供 console user id，已跳过额度采集"
+        return snapshot
 
     snapshot["console_stats_status"] = "disabled"
     snapshot["console_checked_at"] = snapshot["checked_at"]
     snapshot["console_quota_per_dollar"] = CONSOLE_QUOTA_PER_DOLLAR
     snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
+    snapshot["console_error_message"] = "未提供 console session，已跳过额度采集"
+    snapshot["console_signin_status"] = "disabled"
+    snapshot["console_signin_checked_at"] = snapshot["checked_at"]
+    snapshot["console_signin_error_message"] = "未提供 console session，已跳过每日签到"
     return snapshot
 
 

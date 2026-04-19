@@ -1,5 +1,5 @@
 {
-  "service_name": "Anyrouter Claude CLI Status",
+  "service_name": "Anyrouter API Status",
   "overall_status": "operational",
   "http_status": 200,
   "token_ok": true,
@@ -17,5 +17,9 @@
   "console_user_used_quota": 4009222,
   "console_user_request_count": 63,
   "console_quota_per_dollar": 500000,
-  "console_refresh_seconds": 3600
+  "console_refresh_seconds": 3600,
+  "console_signin_status": "ok",
+  "console_signin_checked_at": "2026-04-19T00:30:12Z",
+  "console_signin_last_success_at": "2026-04-19T00:30:12Z",
+  "console_signin_error_message": ""
 }

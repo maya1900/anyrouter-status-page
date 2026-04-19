@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Anyrouter Status</title>
-    <link rel="stylesheet" href="./style.css?v=20260419d">
+    <link rel="stylesheet" href="./style.css?v=20260419e">
   </head>
   <body>
     <main class="page">
@@ -12,7 +12,7 @@
         <div>
           <p class="eyebrow">STATUS PAGE</p>
           <h1>Anyrouter Status</h1>
-          <p class="subtitle">监控项只保留一个：按当前 Claude CLI 请求行为对齐的可用性探针。</p>
+          <p class="subtitle">监控项只保留一个：使用轻量 API 探针检测当前入口是否可用，并尽量减少 token 消耗。</p>
         </div>
         <div class="meta">
           <span id="lastUpdated">加载中...</span>
@@ -30,8 +30,8 @@
         <article class="card">
           <div class="card-header">
             <div>
-              <h2 id="serviceName">Anyrouter Claude CLI Status</h2>
-              <p id="serviceSubLabel" class="muted">Claude CLI 可用性探针</p>
+              <h2 id="serviceName">Anyrouter API Status</h2>
+              <p id="serviceSubLabel" class="muted">轻量 API 可用性探针</p>
             </div>
             <span id="servicePill" class="pill pill-neutral">No data</span>
           </div>
@@ -68,7 +68,7 @@
               <h3>账户额度</h3>
               <span id="consoleCheckedAt" class="muted">未配置</span>
             </div>
-            <p id="consoleHint" class="subtle-note">账户额度每小时刷新一次，仅展示后台原始 quota，不做美元换算。</p>
+            <p id="consoleHint" class="subtle-note">账户额度每小时刷新一次，并在每天 08:30 自动访问后台主页完成一次签到。</p>
             <div class="metrics account-metrics">
               <div class="metric">
                 <span class="metric-label">当前余额</span>
@@ -86,10 +86,22 @@
                 <span class="metric-label">Console 采集</span>
                 <strong id="consoleStatsStatus">-</strong>
               </div>
+              <div class="metric">
+                <span class="metric-label">每日签到</span>
+                <strong id="consoleSigninStatus">-</strong>
+              </div>
+              <div class="metric">
+                <span class="metric-label">上次签到</span>
+                <strong id="consoleSigninAt">-</strong>
+              </div>
             </div>
             <div>
               <span class="detail-label">额度采集错误</span>
               <code id="consoleErrorMessage">-</code>
+            </div>
+            <div>
+              <span class="detail-label">签到错误</span>
+              <code id="consoleSigninErrorMessage">-</code>
             </div>
           </div>
         </article>
@@ -114,6 +126,6 @@
     </main>
 
     <div id="gridTooltip" class="grid-tooltip" hidden></div>
-    <script src="./app.js?v=20260419d"></script>
+    <script src="./app.js?v=20260419e"></script>
   </body>
 </html>
