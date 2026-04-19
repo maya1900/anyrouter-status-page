@@ -5,10 +5,7 @@ import argparse
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -479,98 +476,6 @@ def carry_console_stats(snapshot: Dict[str, Any], previous_status: Dict[str, Any
     return snapshot
 
 
-def run_claude_cli_probe(api_base: str, api_key: str, model: str, timeout: int, prompt: str, checked_at: str) -> Optional[Dict[str, Any]]:
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        return None
-
-    status = default_status()
-    status["checked_at"] = checked_at
-    status["target_model"] = model
-
-    with tempfile.TemporaryDirectory(prefix="anyrouter-claude-probe-") as tmpdir:
-        settings_path = Path(tmpdir) / "settings.json"
-        settings_path.write_text(
-            json.dumps(
-                {
-                    "env": {
-                        "ANTHROPIC_AUTH_TOKEN": api_key,
-                        "ANTHROPIC_BASE_URL": api_base,
-                        "ANTHROPIC_MODEL": model,
-                        "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
-                        "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
-                        "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
-                    },
-                    "model": model,
-                },
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-
-        started = time.monotonic()
-        try:
-            proc = subprocess.run(
-                [
-                    claude_bin,
-                    "-p",
-                    prompt,
-                    "--model",
-                    model,
-                    "--settings",
-                    str(settings_path),
-                    "--output-format",
-                    "json",
-                    "--permission-mode",
-                    "default",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            status["overall_status"] = "major_outage"
-            status["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
-            status["error_message"] = f"Claude CLI timed out after {timeout}s"
-            return status
-        except Exception as exc:
-            status["overall_status"] = "major_outage"
-            status["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
-            status["error_message"] = f"Claude CLI exec failed: {exc}"
-            return status
-
-    status["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
-
-    stdout = proc.stdout.strip()
-    stderr = proc.stderr.strip()
-    if proc.returncode != 0:
-        status["overall_status"] = "major_outage"
-        status["http_status"] = None
-        status["error_message"] = stderr or stdout or f"Claude CLI exited with code {proc.returncode}"
-        return status
-
-    try:
-        data = json.loads(stdout)
-    except ValueError as exc:
-        status["overall_status"] = "degraded"
-        status["error_message"] = f"Claude CLI returned invalid JSON: {exc}"
-        return status
-
-    status["http_status"] = data.get("api_error_status") or 200
-    result_text = str(data.get("result") or "").strip()
-    if not data.get("is_error") and result_text:
-        status["overall_status"] = "operational"
-        status["token_ok"] = True
-        status["last_token"] = preview_text(result_text)
-        status["error_message"] = ""
-        return status
-
-    status["overall_status"] = "major_outage"
-    status["error_message"] = str(data.get("result") or stderr or "Claude CLI probe failed").strip()
-    return status
-
-
 def merge_history(history: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
     now = datetime.fromisoformat(snapshot["checked_at"].replace("Z", "+00:00"))
     current_hour = now.replace(minute=0, second=0, microsecond=0)
@@ -721,23 +626,19 @@ def run_probe(
     previous_status: Dict[str, Any],
 ) -> Dict[str, Any]:
     checked_at = iso_z(utc_now())
-    cli_status = run_claude_cli_probe(api_base, api_key, model, timeout, prompt, checked_at)
-    if cli_status is not None:
-        snapshot = cli_status
-    else:
-        status = default_status()
-        status["checked_at"] = checked_at
-        status["target_model"] = model
+    status = default_status()
+    status["checked_at"] = checked_at
+    status["target_model"] = model
 
-        session_id, account_uuid, device_id = build_request_ids()
-        headers, clean_model = build_headers(api_key, model, session_id)
-        snapshot = execute_probe(
-            api_base,
-            headers,
-            build_cli_status_payload(clean_model, prompt, session_id, account_uuid, device_id),
-            status,
-            timeout,
-        )
+    session_id, account_uuid, device_id = build_request_ids()
+    headers, clean_model = build_headers(api_key, model, session_id)
+    snapshot = execute_probe(
+        api_base,
+        headers,
+        build_cli_status_payload(clean_model, prompt, session_id, account_uuid, device_id),
+        status,
+        timeout,
+    )
 
     if console_session and console_user_id is not None:
         if not should_refresh_console(previous_status, snapshot["checked_at"]):
