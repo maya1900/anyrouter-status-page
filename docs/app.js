@@ -87,7 +87,12 @@ function fmtQuota(value, status) {
   if (value == null || value === "") return "-";
   const num = Number(value);
   if (!Number.isFinite(num)) return String(value);
-  return `${fmtNumber(num)} quota`;
+  const quotaPerDollar = Number(status.console_quota_per_dollar || 500000);
+  if (!Number.isFinite(quotaPerDollar) || quotaPerDollar <= 0) {
+    return `${fmtNumber(num)} quota`;
+  }
+  const dollars = (num / quotaPerDollar).toFixed(2);
+  return `$${dollars}\n(${fmtNumber(num)} quota)`;
 }
 
 function ageInfo(status) {
@@ -144,7 +149,7 @@ function fillConsoleStats(status) {
   const refreshHours = Math.max(1, Math.round(refreshSeconds / 3600));
 
   setText("consoleCheckedAt", checkedAt);
-  setText("consoleHint", `账户额度每 ${refreshHours} 小时刷新一次，仅展示后台原始 quota，不做美元换算。`);
+  setText("consoleHint", `账户额度每 ${refreshHours} 小时刷新一次，按后端展示口径换算：500000 quota = $1。`);
   setText("consoleBalance", fmtQuota(status.console_user_quota, status));
   setText("consoleUsedQuota", fmtQuota(status.console_user_used_quota, status));
   setText("consoleRequestCount", fmtNumber(status.console_user_request_count));

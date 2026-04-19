@@ -26,6 +26,7 @@ CC_SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude."
 WINDOW_HOURS = 24 * 7
 STALE_AFTER_SECONDS = 20 * 60
 CONSOLE_REFRESH_SECONDS = 60 * 60
+CONSOLE_QUOTA_PER_DOLLAR = 500_000
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "docs" / "data"
 STATUS_PATH = DATA_DIR / "status.json"
@@ -278,8 +279,7 @@ def default_status() -> Dict[str, Any]:
         "console_user_quota": None,
         "console_user_used_quota": None,
         "console_user_request_count": None,
-        "console_quota_per_unit": None,
-        "console_display_in_currency": False,
+        "console_quota_per_dollar": CONSOLE_QUOTA_PER_DOLLAR,
         "console_refresh_seconds": CONSOLE_REFRESH_SECONDS,
     }
 
@@ -318,21 +318,6 @@ def write_json(path: Path, payload: Dict[str, Any]) -> None:
 
 def parse_bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def parse_optional_float(value: Optional[str]) -> Optional[float]:
-    if value is None:
-        return None
-    cleaned = value.strip()
-    if not cleaned:
-        return None
-    cleaned = cleaned.replace(",", "")
-    if cleaned.startswith("$"):
-        cleaned = cleaned[1:].strip()
-    try:
-        return float(cleaned)
-    except ValueError:
-        return None
 
 
 def derive_console_base(api_base: str) -> str:
@@ -459,13 +444,10 @@ def enrich_console_stats(
     session_cookie: str,
     user_id: int,
     timeout: int,
-    quota_per_unit: Optional[float],
-    display_in_currency: bool,
 ) -> Dict[str, Any]:
     stats = fetch_console_user_self(console_base, session_cookie, user_id, timeout)
     snapshot.update(stats)
-    snapshot["console_quota_per_unit"] = quota_per_unit
-    snapshot["console_display_in_currency"] = display_in_currency
+    snapshot["console_quota_per_dollar"] = CONSOLE_QUOTA_PER_DOLLAR
     snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
     return snapshot
 
@@ -490,8 +472,7 @@ def carry_console_stats(snapshot: Dict[str, Any], previous_status: Dict[str, Any
         "console_user_quota",
         "console_user_used_quota",
         "console_user_request_count",
-        "console_quota_per_unit",
-        "console_display_in_currency",
+        "console_quota_per_dollar",
     ]:
         snapshot[key] = previous_status.get(key, snapshot.get(key))
     snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
@@ -737,8 +718,6 @@ def run_probe(
     console_base: str,
     console_session: str,
     console_user_id: Optional[int],
-    console_quota_per_unit: Optional[float],
-    console_display_in_currency: bool,
     previous_status: Dict[str, Any],
 ) -> Dict[str, Any]:
     checked_at = iso_z(utc_now())
@@ -769,14 +748,11 @@ def run_probe(
             console_session,
             console_user_id,
             timeout,
-            console_quota_per_unit,
-            console_display_in_currency,
         )
 
     snapshot["console_stats_status"] = "disabled"
     snapshot["console_checked_at"] = snapshot["checked_at"]
-    snapshot["console_quota_per_unit"] = console_quota_per_unit
-    snapshot["console_display_in_currency"] = console_display_in_currency
+    snapshot["console_quota_per_dollar"] = CONSOLE_QUOTA_PER_DOLLAR
     snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
     return snapshot
 
@@ -819,18 +795,6 @@ def parse_args() -> argparse.Namespace:
         default=int(os.environ["ANYROUTER_CONSOLE_USER_ID"]) if os.environ.get("ANYROUTER_CONSOLE_USER_ID") else None,
         help="Anyrouter console localStorage.user.id",
     )
-    parser.add_argument(
-        "--console-quota-per-unit",
-        type=float,
-        default=parse_optional_float(os.environ.get("ANYROUTER_CONSOLE_QUOTA_PER_UNIT")),
-        help="Quota conversion rate used by console UI",
-    )
-    parser.add_argument(
-        "--console-display-in-currency",
-        action="store_true",
-        default=parse_bool(os.environ.get("ANYROUTER_CONSOLE_DISPLAY_IN_CURRENCY", "false")),
-        help="Render console quota as currency when quota-per-unit is configured",
-    )
     parser.add_argument("--status-path", default=str(STATUS_PATH), help="status.json output path")
     parser.add_argument("--history-path", default=str(HISTORY_PATH), help="history.json output path")
     parser.add_argument("--print-json", action="store_true", help="Print the current snapshot to stdout")
@@ -856,8 +820,6 @@ def main() -> int:
         args.console_base,
         args.console_session,
         args.console_user_id,
-        args.console_quota_per_unit,
-        args.console_display_in_currency,
         previous_status,
     )
     history = load_json(Path(args.history_path), default_history())
