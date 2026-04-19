@@ -4,10 +4,18 @@
   "http_status": 200,
   "token_ok": true,
   "last_token": "A",
-  "latency_ms": 12164.34,
-  "checked_at": "2026-04-19T10:24:44Z",
+  "latency_ms": 13644.42,
+  "checked_at": "2026-04-19T10:39:04Z",
   "error_message": "",
   "raw_error_type": null,
   "target_model": "claude-opus-4-7[1m]",
-  "stale_after_seconds": 1200
+  "stale_after_seconds": 1200,
+  "console_stats_status": "error",
+  "console_checked_at": "2026-04-19T10:39:17Z",
+  "console_error_message": "Console bootstrap failed: MissingSchema: Invalid URL '/console': No scheme supplied. Perhaps you meant https:///console?",
+  "console_user_quota": null,
+  "console_user_used_quota": null,
+  "console_user_request_count": null,
+  "console_quota_per_unit": 50.0,
+  "console_display_in_currency": true
 }
