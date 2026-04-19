@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Anyrouter Status</title>
-    <link rel="stylesheet" href="./style.css?v=20260419b">
+    <link rel="stylesheet" href="./style.css?v=20260419c">
   </head>
   <body>
     <main class="page">
@@ -68,6 +68,7 @@
               <h3>账户额度</h3>
               <span id="consoleCheckedAt" class="muted">未配置</span>
             </div>
+            <p id="consoleHint" class="subtle-note">账户额度每小时刷新一次，仅展示后台原始 quota，不做美元换算。</p>
             <div class="metrics account-metrics">
               <div class="metric">
                 <span class="metric-label">当前余额</span>
@@ -113,6 +114,6 @@
     </main>
 
     <div id="gridTooltip" class="grid-tooltip" hidden></div>
-    <script src="./app.js?v=20260419b"></script>
+    <script src="./app.js?v=20260419c"></script>
   </body>
 </html>

@@ -25,6 +25,7 @@ CC_BILLING_HEADER = "x-anthropic-billing-header: cc_version=2.1.114.6e1; cc_entr
 CC_SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude."
 WINDOW_HOURS = 24 * 7
 STALE_AFTER_SECONDS = 20 * 60
+CONSOLE_REFRESH_SECONDS = 60 * 60
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "docs" / "data"
 STATUS_PATH = DATA_DIR / "status.json"
@@ -279,6 +280,7 @@ def default_status() -> Dict[str, Any]:
         "console_user_request_count": None,
         "console_quota_per_unit": None,
         "console_display_in_currency": False,
+        "console_refresh_seconds": CONSOLE_REFRESH_SECONDS,
     }
 
 
@@ -464,6 +466,35 @@ def enrich_console_stats(
     snapshot.update(stats)
     snapshot["console_quota_per_unit"] = quota_per_unit
     snapshot["console_display_in_currency"] = display_in_currency
+    snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
+    return snapshot
+
+
+def should_refresh_console(previous_status: Dict[str, Any], now_iso: str) -> bool:
+    previous_checked_at = previous_status.get("console_checked_at")
+    if not previous_checked_at:
+        return True
+    try:
+        previous_dt = datetime.fromisoformat(str(previous_checked_at).replace("Z", "+00:00"))
+        now_dt = datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
+    except Exception:
+        return True
+    return (now_dt - previous_dt).total_seconds() >= CONSOLE_REFRESH_SECONDS
+
+
+def carry_console_stats(snapshot: Dict[str, Any], previous_status: Dict[str, Any]) -> Dict[str, Any]:
+    for key in [
+        "console_stats_status",
+        "console_checked_at",
+        "console_error_message",
+        "console_user_quota",
+        "console_user_used_quota",
+        "console_user_request_count",
+        "console_quota_per_unit",
+        "console_display_in_currency",
+    ]:
+        snapshot[key] = previous_status.get(key, snapshot.get(key))
+    snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
     return snapshot
 
 
@@ -708,6 +739,7 @@ def run_probe(
     console_user_id: Optional[int],
     console_quota_per_unit: Optional[float],
     console_display_in_currency: bool,
+    previous_status: Dict[str, Any],
 ) -> Dict[str, Any]:
     checked_at = iso_z(utc_now())
     cli_status = run_claude_cli_probe(api_base, api_key, model, timeout, prompt, checked_at)
@@ -729,6 +761,8 @@ def run_probe(
         )
 
     if console_session and console_user_id is not None:
+        if not should_refresh_console(previous_status, snapshot["checked_at"]):
+            return carry_console_stats(snapshot, previous_status)
         return enrich_console_stats(
             snapshot,
             console_base,
@@ -743,6 +777,7 @@ def run_probe(
     snapshot["console_checked_at"] = snapshot["checked_at"]
     snapshot["console_quota_per_unit"] = console_quota_per_unit
     snapshot["console_display_in_currency"] = console_display_in_currency
+    snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
     return snapshot
 
 
@@ -811,6 +846,7 @@ def main() -> int:
         print("Missing ANYROUTER_API_KEY", file=sys.stderr)
         return 2
 
+    previous_status = load_json(Path(args.status_path), default_status())
     snapshot = run_probe(
         args.api_base,
         args.api_key,
@@ -822,6 +858,7 @@ def main() -> int:
         args.console_user_id,
         args.console_quota_per_unit,
         args.console_display_in_currency,
+        previous_status,
     )
     history = load_json(Path(args.history_path), default_history())
     merged_history = merge_history(history, snapshot)

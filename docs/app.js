@@ -87,18 +87,7 @@ function fmtQuota(value, status) {
   if (value == null || value === "") return "-";
   const num = Number(value);
   if (!Number.isFinite(num)) return String(value);
-
-  const quotaPerUnit = Number(status.console_quota_per_unit);
-  const canConvert = Number.isFinite(quotaPerUnit) && quotaPerUnit > 0;
-  if (!canConvert) {
-    return `${fmtNumber(num)} quota`;
-  }
-
-  const money = (num / quotaPerUnit).toFixed(2);
-  if (status.console_display_in_currency) {
-    return `$${money} (${fmtNumber(num)} quota)`;
-  }
-  return `${fmtNumber(num)} quota (~$${money})`;
+  return `${fmtNumber(num)} quota`;
 }
 
 function ageInfo(status) {
@@ -151,8 +140,11 @@ function fillStatus(status) {
 function fillConsoleStats(status) {
   const consoleStatus = status.console_stats_status || "disabled";
   const checkedAt = status.console_checked_at ? `Last fetched: ${fmtDate(status.console_checked_at)}` : "未配置";
+  const refreshSeconds = Number(status.console_refresh_seconds || 3600);
+  const refreshHours = Math.max(1, Math.round(refreshSeconds / 3600));
 
   setText("consoleCheckedAt", checkedAt);
+  setText("consoleHint", `账户额度每 ${refreshHours} 小时刷新一次，仅展示后台原始 quota，不做美元换算。`);
   setText("consoleBalance", fmtQuota(status.console_user_quota, status));
   setText("consoleUsedQuota", fmtQuota(status.console_user_used_quota, status));
   setText("consoleRequestCount", fmtNumber(status.console_user_request_count));

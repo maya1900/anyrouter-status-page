@@ -227,6 +227,13 @@ h1 {
   margin-bottom: 12px;
 }
 
+.subtle-note {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 code {
   display: block;
   padding: 10px 12px;

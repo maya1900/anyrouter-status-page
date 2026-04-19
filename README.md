@@ -22,6 +22,8 @@
   - 历史消耗
   - 请求次数
   - 采集失败时会直接显示错误
+  - 默认每 1 小时刷新一次
+  - 页面只展示后台原始 quota，不做美元换算
 - 页面会额外标记数据是否过期
   - 超过 20 分钟未刷新，直接提示“当前页面不可信”
 - 只保留最近 7 天，按小时聚合
@@ -43,8 +45,6 @@
      - `ANYROUTER_CONSOLE_BASE`
      - `ANYROUTER_CONSOLE_SESSION`
      - `ANYROUTER_CONSOLE_USER_ID`
-     - `ANYROUTER_CONSOLE_QUOTA_PER_UNIT`（可选）
-     - `ANYROUTER_CONSOLE_DISPLAY_IN_CURRENCY`（可选，`true/false`）
 
 3. 安装依赖：
 
@@ -80,8 +80,6 @@
      - `ANYROUTER_CONSOLE_BASE`
      - `ANYROUTER_CONSOLE_SESSION`
      - `ANYROUTER_CONSOLE_USER_ID`
-     - `ANYROUTER_CONSOLE_QUOTA_PER_UNIT`（可选）
-     - `ANYROUTER_CONSOLE_DISPLAY_IN_CURRENCY`（可选）
 3. 启用 Actions
 4. 使用 Cloudflare Worker 定时触发该 workflow 的 `repository_dispatch`
    - 当前线上配置为每 10 分钟触发一次
@@ -212,10 +210,6 @@ Worker 每次跑的时候会调用 GitHub：
   - `ANYROUTER_CONSOLE_USER_ID` = 浏览器控制台执行 `JSON.parse(localStorage.getItem("user")).id`
 - 这两个值缺一不可；缺少时页面会显示“未配置”，不会影响主状态探针。
 - `ANYROUTER_CONSOLE_SESSION` 本质上是登录态，失效后需要重新更新 Secret。
-- 如果你想把余额显示成 `$` 而不是原始 quota：
-  - 填 `ANYROUTER_CONSOLE_QUOTA_PER_UNIT`
-  - 再把 `ANYROUTER_CONSOLE_DISPLAY_IN_CURRENCY=true`
-
 ## 控制台额度采集
 
 状态页新增的是“账户额度”区块，数据来源不是 OpenAI 兼容 API，而是 AnyRouter 后台自己的 Web API：
@@ -233,6 +227,16 @@ Worker 每次跑的时候会调用 GitHub：
 - `ANYROUTER_CONSOLE_USER_ID`
 
 配好，workflow 跑的时候就会自动把余额和消耗写进 `docs/data/status.json`。
+
+额度采集和 CLI 探针不是一个刷新频率：
+
+- CLI 可用性探针：跟 workflow 一样，每 10 分钟一次
+- 控制台额度采集：脚本内置 1 小时缓存，未过期时直接沿用上次额度数据
+
+这样做是为了：
+
+- 让 CLI 可用性继续尽量实时
+- 避免后台额度接口没必要被每 10 分钟反复拉取
 
 ## Opus 4.7[1m] 兼容说明
 
