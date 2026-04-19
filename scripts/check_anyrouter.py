@@ -483,19 +483,60 @@ def carry_console_signin(snapshot: Dict[str, Any], previous_status: Dict[str, An
     return snapshot
 
 
+def parse_iso_dt(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def normalize_console_signin(snapshot: Dict[str, Any], previous_status: Dict[str, Any], now_dt: Optional[datetime] = None) -> Dict[str, Any]:
+    current = now_dt.astimezone(SHANGHAI_TZ) if now_dt else shanghai_now()
+    due_at = console_signin_due(current)
+
+    snapshot = carry_console_signin(snapshot, previous_status)
+    last_success_dt = parse_iso_dt(snapshot.get("console_signin_last_success_at"))
+    last_checked_dt = parse_iso_dt(snapshot.get("console_signin_checked_at"))
+    last_success_local = last_success_dt.astimezone(SHANGHAI_TZ) if last_success_dt else None
+    last_checked_local = last_checked_dt.astimezone(SHANGHAI_TZ) if last_checked_dt else None
+
+    if current < due_at:
+        snapshot["console_signin_status"] = "not_due"
+        snapshot["console_signin_error_message"] = ""
+        snapshot["console_signin_checked_at"] = snapshot["checked_at"]
+        return snapshot
+
+    if last_success_local and last_success_local.date() == current.date():
+        snapshot["console_signin_status"] = "ok"
+        snapshot["console_signin_error_message"] = ""
+        return snapshot
+
+    if (
+        snapshot.get("console_signin_status") == "error"
+        and last_checked_local
+        and last_checked_local.date() == current.date()
+        and last_checked_local >= due_at
+    ):
+        return snapshot
+
+    snapshot["console_signin_status"] = "waiting"
+    snapshot["console_signin_error_message"] = ""
+    snapshot["console_signin_checked_at"] = snapshot["checked_at"]
+    return snapshot
+
+
 def should_run_console_signin(previous_status: Dict[str, Any], now_dt: Optional[datetime] = None) -> bool:
     current = now_dt.astimezone(SHANGHAI_TZ) if now_dt else shanghai_now()
     due_at = console_signin_due(current)
     if current < due_at:
         return False
 
-    last_success_at = previous_status.get("console_signin_last_success_at")
-    if not last_success_at:
+    last_success_dt = parse_iso_dt(previous_status.get("console_signin_last_success_at"))
+    if not last_success_dt:
         return True
-    try:
-        success_dt = datetime.fromisoformat(str(last_success_at).replace("Z", "+00:00")).astimezone(SHANGHAI_TZ)
-    except Exception:
-        return True
+    success_dt = last_success_dt.astimezone(SHANGHAI_TZ)
     return success_dt.date() != current.date()
 
 
@@ -710,14 +751,10 @@ def run_probe(
     )
 
     if console_session:
+        snapshot = normalize_console_signin(snapshot, previous_status, current_local)
+
         if should_run_console_signin(previous_status, current_local):
             snapshot = run_console_signin(snapshot, console_base, console_session, timeout)
-        else:
-            snapshot = carry_console_signin(snapshot, previous_status)
-            if snapshot.get("console_signin_status") == "disabled":
-                snapshot["console_signin_status"] = "waiting"
-                snapshot["console_signin_checked_at"] = snapshot["checked_at"]
-                snapshot["console_signin_error_message"] = ""
 
         if console_user_id is not None:
             if not should_refresh_console(previous_status, snapshot["checked_at"]):

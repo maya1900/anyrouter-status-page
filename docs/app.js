@@ -180,8 +180,14 @@ function fillConsoleStats(status) {
     return;
   }
 
+  if (signinStatus === "not_due") {
+    setText("consoleSigninStatus", "未到时间");
+    setText("consoleSigninErrorMessage", "-");
+    return;
+  }
+
   if (signinStatus === "waiting" || status.console_signin_checked_at) {
-    setText("consoleSigninStatus", "等待下次");
+    setText("consoleSigninStatus", "待签到");
     setText("consoleSigninErrorMessage", "-");
     return;
   }
