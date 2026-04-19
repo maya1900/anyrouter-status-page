@@ -180,6 +180,12 @@ function fillConsoleStats(status) {
     return;
   }
 
+  if (signinStatus === "pending") {
+    setText("consoleSigninStatus", "待确认");
+    setText("consoleSigninErrorMessage", status.console_signin_error_message || "-");
+    return;
+  }
+
   if (signinStatus === "not_due") {
     setText("consoleSigninStatus", "未到时间");
     setText("consoleSigninErrorMessage", "-");

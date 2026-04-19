@@ -30,6 +30,7 @@ CONSOLE_QUOTA_PER_DOLLAR = 500_000
 SHANGHAI_TZ = timezone(timedelta(hours=8))
 CONSOLE_SIGNIN_HOUR = 8
 CONSOLE_SIGNIN_MINUTE = 30
+CONSOLE_SIGNIN_VERIFY_WAIT_SECONDS = 8
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "docs" / "data"
 STATUS_PATH = DATA_DIR / "status.json"
@@ -286,7 +287,10 @@ def default_status() -> Dict[str, Any]:
         "console_refresh_seconds": CONSOLE_REFRESH_SECONDS,
         "console_signin_status": "disabled",
         "console_signin_checked_at": None,
+        "console_signin_attempted_at": None,
         "console_signin_last_success_at": None,
+        "console_signin_baseline_quota": None,
+        "console_signin_awarded_quota": None,
         "console_signin_error_message": "",
     }
 
@@ -407,8 +411,8 @@ def bootstrap_console_session(session: requests.Session, console_base: str, time
     session.get(f"{console_base.rstrip('/')}/console", timeout=timeout)
 
 
-def fetch_console_user_self(console_base: str, session_cookie: str, user_id: int, timeout: int) -> Dict[str, Any]:
-    result = {
+def empty_console_stats_result() -> Dict[str, Any]:
+    return {
         "console_stats_status": "error",
         "console_checked_at": iso_z(utc_now()),
         "console_error_message": "",
@@ -417,12 +421,14 @@ def fetch_console_user_self(console_base: str, session_cookie: str, user_id: int
         "console_user_request_count": None,
     }
 
-    session = create_console_session(console_base, session_cookie)
-    try:
-        bootstrap_console_session(session, console_base, timeout)
-    except Exception as exc:
-        result["console_error_message"] = f"Console bootstrap failed: {type(exc).__name__}: {exc}"
-        return result
+
+def fetch_console_user_self_with_session(
+    session: requests.Session,
+    console_base: str,
+    user_id: int,
+    timeout: int,
+) -> Dict[str, Any]:
+    result = empty_console_stats_result()
     try:
         response = session.get(
             f"{console_base.rstrip('/')}/api/user/self",
@@ -458,6 +464,17 @@ def fetch_console_user_self(console_base: str, session_cookie: str, user_id: int
     return result
 
 
+def fetch_console_user_self(console_base: str, session_cookie: str, user_id: int, timeout: int) -> Dict[str, Any]:
+    session = create_console_session(console_base, session_cookie)
+    result = empty_console_stats_result()
+    try:
+        bootstrap_console_session(session, console_base, timeout)
+    except Exception as exc:
+        result["console_error_message"] = f"Console bootstrap failed: {type(exc).__name__}: {exc}"
+        return result
+    return fetch_console_user_self_with_session(session, console_base, user_id, timeout)
+
+
 def enrich_console_stats(
     snapshot: Dict[str, Any],
     console_base: str,
@@ -476,7 +493,10 @@ def carry_console_signin(snapshot: Dict[str, Any], previous_status: Dict[str, An
     for key in [
         "console_signin_status",
         "console_signin_checked_at",
+        "console_signin_attempted_at",
         "console_signin_last_success_at",
+        "console_signin_baseline_quota",
+        "console_signin_awarded_quota",
         "console_signin_error_message",
     ]:
         snapshot[key] = previous_status.get(key, snapshot.get(key))
@@ -505,6 +525,7 @@ def normalize_console_signin(snapshot: Dict[str, Any], previous_status: Dict[str
     if current < due_at:
         snapshot["console_signin_status"] = "not_due"
         snapshot["console_signin_error_message"] = ""
+        snapshot["console_signin_awarded_quota"] = None
         snapshot["console_signin_checked_at"] = snapshot["checked_at"]
         return snapshot
 
@@ -512,6 +533,12 @@ def normalize_console_signin(snapshot: Dict[str, Any], previous_status: Dict[str
         snapshot["console_signin_status"] = "ok"
         snapshot["console_signin_error_message"] = ""
         return snapshot
+
+    attempted_dt = parse_iso_dt(snapshot.get("console_signin_attempted_at"))
+    attempted_local = attempted_dt.astimezone(SHANGHAI_TZ) if attempted_dt else None
+    if attempted_local and attempted_local.date() == current.date() and attempted_local >= due_at:
+        if snapshot.get("console_signin_status") == "pending":
+            return snapshot
 
     if (
         snapshot.get("console_signin_status") == "error"
@@ -523,6 +550,7 @@ def normalize_console_signin(snapshot: Dict[str, Any], previous_status: Dict[str
 
     snapshot["console_signin_status"] = "waiting"
     snapshot["console_signin_error_message"] = ""
+    snapshot["console_signin_awarded_quota"] = None
     snapshot["console_signin_checked_at"] = snapshot["checked_at"]
     return snapshot
 
@@ -533,6 +561,12 @@ def should_run_console_signin(previous_status: Dict[str, Any], now_dt: Optional[
     if current < due_at:
         return False
 
+    attempted_dt = parse_iso_dt(previous_status.get("console_signin_attempted_at"))
+    if attempted_dt:
+        attempted_local = attempted_dt.astimezone(SHANGHAI_TZ)
+        if attempted_local.date() == current.date():
+            return False
+
     last_success_dt = parse_iso_dt(previous_status.get("console_signin_last_success_at"))
     if not last_success_dt:
         return True
@@ -540,10 +574,54 @@ def should_run_console_signin(previous_status: Dict[str, Any], now_dt: Optional[
     return success_dt.date() != current.date()
 
 
-def run_console_signin(snapshot: Dict[str, Any], console_base: str, session_cookie: str, timeout: int) -> Dict[str, Any]:
+def resolve_console_signin_from_quota(snapshot: Dict[str, Any], now_dt: Optional[datetime] = None) -> Dict[str, Any]:
+    current = now_dt.astimezone(SHANGHAI_TZ) if now_dt else shanghai_now()
+    due_at = console_signin_due(current)
+    if current < due_at:
+        snapshot["console_signin_status"] = "not_due"
+        snapshot["console_signin_error_message"] = ""
+        snapshot["console_signin_awarded_quota"] = None
+        return snapshot
+
+    baseline_quota = snapshot.get("console_signin_baseline_quota")
+    current_quota = snapshot.get("console_user_quota")
+    if baseline_quota is None or current_quota is None:
+        return snapshot
+
+    try:
+        baseline_value = int(baseline_quota)
+        current_value = int(current_quota)
+    except Exception:
+        return snapshot
+
+    if current_value > baseline_value:
+        snapshot["console_signin_status"] = "ok"
+        snapshot["console_signin_last_success_at"] = snapshot.get("console_checked_at") or snapshot.get("checked_at")
+        snapshot["console_signin_awarded_quota"] = current_value - baseline_value
+        snapshot["console_signin_error_message"] = ""
+        return snapshot
+
+    if snapshot.get("console_signin_status") == "pending":
+        snapshot["console_signin_awarded_quota"] = 0
+        if not snapshot.get("console_signin_error_message"):
+            snapshot["console_signin_error_message"] = "已触发签到，等待额度增加确认"
+    return snapshot
+
+
+def run_console_signin(
+    snapshot: Dict[str, Any],
+    console_base: str,
+    session_cookie: str,
+    timeout: int,
+    user_id: Optional[int],
+    previous_status: Dict[str, Any],
+) -> Dict[str, Any]:
     checked_at = iso_z(utc_now())
     snapshot["console_signin_checked_at"] = checked_at
+    snapshot["console_signin_attempted_at"] = checked_at
     snapshot["console_signin_error_message"] = ""
+    snapshot["console_signin_awarded_quota"] = None
+    snapshot["console_signin_baseline_quota"] = previous_status.get("console_user_quota")
 
     session = create_console_session(console_base, session_cookie)
     try:
@@ -553,8 +631,20 @@ def run_console_signin(snapshot: Dict[str, Any], console_base: str, session_cook
         snapshot["console_signin_error_message"] = f"Console sign-in failed: {type(exc).__name__}: {exc}"
         return snapshot
 
-    snapshot["console_signin_status"] = "ok"
-    snapshot["console_signin_last_success_at"] = checked_at
+    if user_id is None:
+        snapshot["console_signin_status"] = "pending"
+        snapshot["console_signin_error_message"] = "已访问后台主页，等待后续额度变化确认签到结果"
+        return snapshot
+
+    wait_seconds = min(CONSOLE_SIGNIN_VERIFY_WAIT_SECONDS, max(1, timeout))
+    time.sleep(wait_seconds)
+    stats = fetch_console_user_self_with_session(session, console_base, user_id, timeout)
+    snapshot.update(stats)
+    snapshot["console_quota_per_dollar"] = CONSOLE_QUOTA_PER_DOLLAR
+    snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
+    snapshot["console_signin_status"] = "pending"
+    snapshot["console_signin_error_message"] = "已触发签到，等待额度增加确认"
+    snapshot = resolve_console_signin_from_quota(snapshot)
     return snapshot
 
 
@@ -752,14 +842,27 @@ def run_probe(
 
     if console_session:
         snapshot = normalize_console_signin(snapshot, previous_status, current_local)
+        sign_in_ran = False
 
         if should_run_console_signin(previous_status, current_local):
-            snapshot = run_console_signin(snapshot, console_base, console_session, timeout)
+            sign_in_ran = True
+            snapshot = run_console_signin(
+                snapshot,
+                console_base,
+                console_session,
+                timeout,
+                console_user_id,
+                previous_status,
+            )
 
         if console_user_id is not None:
-            if not should_refresh_console(previous_status, snapshot["checked_at"]):
+            if sign_in_ran:
+                return resolve_console_signin_from_quota(snapshot, current_local)
+            force_console_refresh = snapshot.get("console_signin_status") == "pending"
+            if not should_refresh_console(previous_status, snapshot["checked_at"]) and not force_console_refresh:
                 return carry_console_stats(snapshot, previous_status)
-            return enrich_console_stats(snapshot, console_base, console_session, console_user_id, timeout)
+            snapshot = enrich_console_stats(snapshot, console_base, console_session, console_user_id, timeout)
+            return resolve_console_signin_from_quota(snapshot, current_local)
 
         snapshot["console_stats_status"] = "disabled"
         snapshot["console_checked_at"] = snapshot["checked_at"]
