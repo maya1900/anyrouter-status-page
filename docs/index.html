@@ -12,7 +12,7 @@
         <div>
           <p class="eyebrow">STATUS PAGE</p>
           <h1>Anyrouter Status</h1>
-          <p class="subtitle">监控项：模拟 Claude Code 请求，验证 anyrouter 是否能返回 1 个 token。</p>
+          <p class="subtitle">主状态按 CLI 兼容探针判定；合成探针只作为对照，避免假绿灯。</p>
         </div>
         <div class="meta">
           <span id="lastUpdated">加载中...</span>
@@ -22,13 +22,16 @@
       <section id="overallBanner" class="banner banner-neutral">
         正在加载状态...
       </section>
+      <section id="freshnessAlert" class="freshness freshness-hidden" hidden>
+        监控数据加载中...
+      </section>
 
       <section class="grid">
         <article class="card">
           <div class="card-header">
             <div>
-              <h2 id="serviceName">Anyrouter Claude Code Probe</h2>
-              <p class="muted">合成探针</p>
+              <h2 id="serviceName">Anyrouter Claude CLI Compatibility</h2>
+              <p id="serviceSubLabel" class="muted">CLI 兼容探针（主状态）</p>
             </div>
             <span id="servicePill" class="pill pill-neutral">No data</span>
           </div>
@@ -60,6 +63,16 @@
               <code id="errorMessage">-</code>
             </div>
           </div>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h2>探针对照</h2>
+              <p class="muted">主状态看 CLI 兼容探针，合成探针只用于定位网关兼容差异</p>
+            </div>
+          </div>
+          <div id="probeMatrix" class="probe-matrix"></div>
         </article>
 
         <article class="card">

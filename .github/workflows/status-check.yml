@@ -2,8 +2,11 @@ name: anyrouter-status-check
 
 on:
   workflow_dispatch:
+  repository_dispatch:
+    types:
+      - status-check
   schedule:
-    - cron: "2,12,22,32,42,52 * * * *"
+    - cron: "*/10 * * * *"
 
 concurrency:
   group: anyrouter-status-check

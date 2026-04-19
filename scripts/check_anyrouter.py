@@ -15,9 +15,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
-CC_BILLING_HEADER = "x-anthropic-billing-header: cc_version=2.1.111.b2b; cc_entrypoint=cli; cch=00000;"
+CC_BILLING_HEADER = "x-anthropic-billing-header: cc_version=2.1.98.80e; cc_entrypoint=sdk-cli; cch=00000;"
 CC_SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude."
 WINDOW_HOURS = 24 * 7
+STALE_AFTER_SECONDS = 20 * 60
+PRIMARY_PROBE = "cli_compat"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "docs" / "data"
 STATUS_PATH = DATA_DIR / "status.json"
@@ -86,11 +88,11 @@ def build_headers(api_key: str, model: str, session_id: str) -> Tuple[Dict[str, 
         "X-Stainless-OS": "MacOS",
         "X-Stainless-Arch": "arm64",
         "X-Stainless-Runtime": "node",
-        "X-Stainless-Runtime-Version": "v23.10.0",
+        "X-Stainless-Runtime-Version": "v24.3.0",
         "anthropic-version": "2023-06-01",
         "anthropic-beta": ",".join(beta_parts),
         "anthropic-dangerous-direct-browser-access": "true",
-        "user-agent": "claude-cli/2.1.111 (external, cli)",
+        "user-agent": "claude-cli/2.1.98 (external, sdk-cli)",
         "x-app": "cli",
         "X-Claude-Code-Session-Id": session_id,
         "accept-language": "*",
@@ -100,45 +102,9 @@ def build_headers(api_key: str, model: str, session_id: str) -> Tuple[Dict[str, 
     return headers, clean_model
 
 
-def build_payload(model: str, prompt: str, session_id: str, account_uuid: str, device_id: str) -> Dict[str, Any]:
+def build_common_payload(model: str, prompt: str) -> Dict[str, Any]:
     return {
         "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": prompt,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
-            }
-        ],
-        "system": [
-            {
-                "type": "text",
-                "text": CC_BILLING_HEADER,
-            },
-            {
-                "type": "text",
-                "text": CC_SYSTEM,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        "metadata": {
-            "user_id": json.dumps(
-                {
-                    "device_id": device_id,
-                    "account_uuid": account_uuid,
-                    "session_id": session_id,
-                },
-                separators=(",", ":"),
-            )
-        },
-        # new-api currently routes Claude Code-style Opus 4.7 requests more
-        # reliably when the modern thinking/effort envelope is present. Keep
-        # the probe cheap by pairing it with max_tokens=1 and no tool schemas.
         "thinking": {"type": "adaptive"},
         "output_config": {"effort": "medium"},
         "context_management": {
@@ -155,6 +121,57 @@ def build_payload(model: str, prompt: str, session_id: str, account_uuid: str, d
     }
 
 
+def build_synthetic_payload(
+    model: str,
+    prompt: str,
+    session_id: str,
+    account_uuid: str,
+    device_id: str,
+) -> Dict[str, Any]:
+    payload = build_common_payload(model, prompt)
+    payload["messages"] = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
+    ]
+    payload["system"] = [
+        {
+            "type": "text",
+            "text": CC_BILLING_HEADER,
+        },
+        {
+            "type": "text",
+            "text": CC_SYSTEM,
+            "cache_control": {"type": "ephemeral"},
+        },
+    ]
+    payload["metadata"] = {
+        "user_id": json.dumps(
+            {
+                "device_id": device_id,
+                "account_uuid": account_uuid,
+                "session_id": session_id,
+            },
+            separators=(",", ":"),
+        )
+    }
+    return payload
+
+
+def build_cli_compat_payload(model: str, prompt: str) -> Dict[str, Any]:
+    payload = build_common_payload(model, prompt)
+    payload["messages"] = [{"role": "user", "content": prompt}]
+    payload["system"] = CC_SYSTEM
+    return payload
+
+
 def extract_text(data: Dict[str, Any]) -> str:
     chunks: List[str] = []
     content = data.get("content", [])
@@ -164,7 +181,6 @@ def extract_text(data: Dict[str, Any]) -> str:
         if isinstance(block, dict) and block.get("type") == "text":
             chunks.append(str(block.get("text", "")))
 
-    # Some gateways return OpenAI-style payloads even on Anthropic-compatible paths.
     for choice in data.get("choices", []):
         if not isinstance(choice, dict):
             continue
@@ -244,9 +260,25 @@ def parse_error_payload(status_code: int, body_text: str) -> Tuple[str, Optional
     return (message or f"HTTP {status_code}", raw_error_type)
 
 
+def default_probe_result(name: str, label: str, model: str, checked_at: str) -> Dict[str, Any]:
+    return {
+        "name": name,
+        "label": label,
+        "overall_status": "no_data",
+        "http_status": None,
+        "token_ok": False,
+        "last_token": "",
+        "latency_ms": None,
+        "checked_at": checked_at,
+        "error_message": "No checks yet",
+        "raw_error_type": None,
+        "target_model": model,
+    }
+
+
 def default_status() -> Dict[str, Any]:
     return {
-        "service_name": "Anyrouter Claude Code Probe",
+        "service_name": "Anyrouter Claude CLI Compatibility",
         "overall_status": "no_data",
         "http_status": None,
         "token_ok": False,
@@ -256,6 +288,10 @@ def default_status() -> Dict[str, Any]:
         "error_message": "No checks yet",
         "raw_error_type": None,
         "target_model": None,
+        "primary_probe": PRIMARY_PROBE,
+        "primary_probe_label": "CLI 兼容探针",
+        "stale_after_seconds": STALE_AFTER_SECONDS,
+        "probes": {},
     }
 
 
@@ -356,18 +392,15 @@ def merge_history(history: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str
     }
 
 
-def run_probe(api_base: str, api_key: str, model: str, timeout: int, prompt: str) -> Dict[str, Any]:
-    checked_at = iso_z(utc_now())
+def execute_probe(
+    api_base: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    result: Dict[str, Any],
+    timeout: int,
+) -> Dict[str, Any]:
     started = time.monotonic()
-    status = default_status()
-    status["checked_at"] = checked_at
-    status["target_model"] = model
-
-    session_id, account_uuid, device_id = build_request_ids()
-    headers, clean_model = build_headers(api_key, model, session_id)
-    payload = build_payload(clean_model, prompt, session_id, account_uuid, device_id)
     url = auto_make_url(api_base, "messages") + "?beta=true"
-
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -377,58 +410,96 @@ def run_probe(api_base: str, api_key: str, model: str, timeout: int, prompt: str
 
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            status["http_status"] = response.getcode()
+            result["http_status"] = response.getcode()
             body_text = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
-        status["http_status"] = exc.code
+        result["http_status"] = exc.code
         body_text = exc.read().decode("utf-8", errors="replace")
-        status["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
+        result["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
         error_message, raw_error_type = parse_error_payload(exc.code, body_text)
-        status["overall_status"] = "major_outage"
-        status["error_message"] = error_message
-        status["raw_error_type"] = raw_error_type
-        return status
+        result["overall_status"] = "major_outage"
+        result["error_message"] = error_message
+        result["raw_error_type"] = raw_error_type
+        return result
     except urllib.error.URLError as exc:
-        status["overall_status"] = "major_outage"
-        status["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
-        status["error_message"] = f"{type(exc.reason).__name__}: {exc.reason}"
-        return status
+        result["overall_status"] = "major_outage"
+        result["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
+        result["error_message"] = f"{type(exc.reason).__name__}: {exc.reason}"
+        return result
     except Exception as exc:
-        status["overall_status"] = "major_outage"
-        status["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
-        status["error_message"] = f"{type(exc).__name__}: {exc}"
-        return status
+        result["overall_status"] = "major_outage"
+        result["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
+        result["error_message"] = f"{type(exc).__name__}: {exc}"
+        return result
 
-    status["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
+    result["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
 
-    if status["http_status"] != 200:
-        error_message, raw_error_type = parse_error_payload(int(status["http_status"]), body_text)
-        status["overall_status"] = "major_outage"
-        status["error_message"] = error_message
-        status["raw_error_type"] = raw_error_type
-        return status
+    if result["http_status"] != 200:
+        error_message, raw_error_type = parse_error_payload(int(result["http_status"]), body_text)
+        result["overall_status"] = "major_outage"
+        result["error_message"] = error_message
+        result["raw_error_type"] = raw_error_type
+        return result
 
     try:
         data = json.loads(body_text)
     except ValueError as exc:
-        status["overall_status"] = "degraded"
-        status["error_message"] = f"Invalid JSON: {exc}"
-        return status
+        result["overall_status"] = "degraded"
+        result["error_message"] = f"Invalid JSON: {exc}"
+        return result
 
     text = extract_text(data)
     if text:
-        status["overall_status"] = "operational"
-        status["token_ok"] = True
-        status["last_token"] = preview_text(text)
-        status["error_message"] = ""
-        return status
+        result["overall_status"] = "operational"
+        result["token_ok"] = True
+        result["last_token"] = preview_text(text)
+        result["error_message"] = ""
+        return result
 
-    status["overall_status"] = "degraded"
+    result["overall_status"] = "degraded"
     summary = response_summary(data)
     if summary:
-        status["error_message"] = f"No text content in response ({summary})"
+        result["error_message"] = f"No text content in response ({summary})"
     else:
-        status["error_message"] = "No text content in response"
+        result["error_message"] = "No text content in response"
+    return result
+
+
+def run_probe(api_base: str, api_key: str, model: str, timeout: int, prompt: str) -> Dict[str, Any]:
+    checked_at = iso_z(utc_now())
+    status = default_status()
+    status["checked_at"] = checked_at
+    status["target_model"] = model
+
+    session_id, account_uuid, device_id = build_request_ids()
+    headers, clean_model = build_headers(api_key, model, session_id)
+
+    synthetic = default_probe_result("synthetic", "合成探针", model, checked_at)
+    synthetic = execute_probe(
+        api_base,
+        headers,
+        build_synthetic_payload(clean_model, prompt, session_id, account_uuid, device_id),
+        synthetic,
+        timeout,
+    )
+
+    cli_compat = default_probe_result("cli_compat", "CLI 兼容探针", model, checked_at)
+    cli_compat = execute_probe(
+        api_base,
+        headers,
+        build_cli_compat_payload(clean_model, prompt),
+        cli_compat,
+        timeout,
+    )
+
+    status["probes"] = {
+        "cli_compat": cli_compat,
+        "synthetic": synthetic,
+    }
+
+    primary = status["probes"][PRIMARY_PROBE]
+    for key in ("overall_status", "http_status", "token_ok", "last_token", "latency_ms", "error_message", "raw_error_type"):
+        status[key] = primary.get(key)
     return status
 
 
@@ -491,6 +562,7 @@ def main() -> int:
                     "token_ok": snapshot["token_ok"],
                     "checked_at": snapshot["checked_at"],
                     "error_message": snapshot["error_message"],
+                    "primary_probe": snapshot["primary_probe"],
                 },
                 ensure_ascii=False,
             )
