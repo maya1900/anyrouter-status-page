@@ -1,43 +1,13 @@
 {
-  "service_name": "Anyrouter Claude CLI Compatibility",
-  "overall_status": "major_outage",
-  "http_status": 503,
-  "token_ok": false,
-  "last_token": "",
-  "latency_ms": 1151.48,
-  "checked_at": "2026-04-19T07:19:12Z",
-  "error_message": "Service Unavailable",
-  "raw_error_type": "error",
+  "service_name": "Anyrouter Claude CLI Status",
+  "overall_status": "operational",
+  "http_status": 200,
+  "token_ok": true,
+  "last_token": "A",
+  "latency_ms": 12318.95,
+  "checked_at": "2026-04-19T07:23:28Z",
+  "error_message": "",
+  "raw_error_type": null,
   "target_model": "claude-opus-4-7[1m]",
-  "primary_probe": "cli_compat",
-  "primary_probe_label": "CLI 兼容探针",
-  "stale_after_seconds": 1200,
-  "probes": {
-    "cli_compat": {
-      "name": "cli_compat",
-      "label": "CLI 兼容探针",
-      "overall_status": "major_outage",
-      "http_status": 503,
-      "token_ok": false,
-      "last_token": "",
-      "latency_ms": 1151.48,
-      "checked_at": "2026-04-19T07:19:12Z",
-      "error_message": "Service Unavailable",
-      "raw_error_type": "error",
-      "target_model": "claude-opus-4-7[1m]"
-    },
-    "synthetic": {
-      "name": "synthetic",
-      "label": "合成探针",
-      "overall_status": "major_outage",
-      "http_status": 520,
-      "token_ok": false,
-      "last_token": "",
-      "latency_ms": 1768.14,
-      "checked_at": "2026-04-19T07:19:12Z",
-      "error_message": "HTTP 520",
-      "raw_error_type": null,
-      "target_model": "claude-opus-4-7[1m]"
-    }
-  }
+  "stale_after_seconds": 1200
 }

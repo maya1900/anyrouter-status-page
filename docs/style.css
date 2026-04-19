@@ -204,63 +204,6 @@ h1 {
   gap: 12px;
 }
 
-.probe-matrix {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.probe-card {
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 16px;
-  background: #fbfcfe;
-}
-
-.probe-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.probe-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 12px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.mini-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #fff;
-}
-
-.mini-pill-operational {
-  background: var(--green);
-}
-
-.mini-pill-degraded {
-  background: var(--yellow);
-}
-
-.mini-pill-major_outage {
-  background: var(--red);
-}
-
-.mini-pill-no_data {
-  background: var(--neutral);
-}
-
 code {
   display: block;
   padding: 10px 12px;
@@ -377,9 +320,6 @@ code {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .probe-matrix {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 560px) {

@@ -12,7 +12,7 @@
         <div>
           <p class="eyebrow">STATUS PAGE</p>
           <h1>Anyrouter Status</h1>
-          <p class="subtitle">主状态按 CLI 兼容探针判定；合成探针只作为对照，避免假绿灯。</p>
+          <p class="subtitle">监控项只保留一个：按当前 Claude CLI 请求行为对齐的可用性探针。</p>
         </div>
         <div class="meta">
           <span id="lastUpdated">加载中...</span>
@@ -30,8 +30,8 @@
         <article class="card">
           <div class="card-header">
             <div>
-              <h2 id="serviceName">Anyrouter Claude CLI Compatibility</h2>
-              <p id="serviceSubLabel" class="muted">CLI 兼容探针（主状态）</p>
+              <h2 id="serviceName">Anyrouter Claude CLI Status</h2>
+              <p id="serviceSubLabel" class="muted">Claude CLI 可用性探针</p>
             </div>
             <span id="servicePill" class="pill pill-neutral">No data</span>
           </div>
@@ -63,16 +63,6 @@
               <code id="errorMessage">-</code>
             </div>
           </div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <h2>探针对照</h2>
-              <p class="muted">主状态看 CLI 兼容探针，合成探针只用于定位网关兼容差异</p>
-            </div>
-          </div>
-          <div id="probeMatrix" class="probe-matrix"></div>
         </article>
 
         <article class="card">

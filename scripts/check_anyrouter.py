@@ -5,7 +5,10 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -15,11 +18,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
-CC_BILLING_HEADER = "x-anthropic-billing-header: cc_version=2.1.98.80e; cc_entrypoint=sdk-cli; cch=00000;"
+CC_BILLING_HEADER = "x-anthropic-billing-header: cc_version=2.1.114.6e1; cc_entrypoint=sdk-cli; cch=00000;"
 CC_SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude."
 WINDOW_HOURS = 24 * 7
 STALE_AFTER_SECONDS = 20 * 60
-PRIMARY_PROBE = "cli_compat"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "docs" / "data"
 STATUS_PATH = DATA_DIR / "status.json"
@@ -92,7 +94,7 @@ def build_headers(api_key: str, model: str, session_id: str) -> Tuple[Dict[str, 
         "anthropic-version": "2023-06-01",
         "anthropic-beta": ",".join(beta_parts),
         "anthropic-dangerous-direct-browser-access": "true",
-        "user-agent": "claude-cli/2.1.98 (external, sdk-cli)",
+        "user-agent": "claude-cli/2.1.114 (external, sdk-cli)",
         "x-app": "cli",
         "X-Claude-Code-Session-Id": session_id,
         "accept-language": "*",
@@ -121,7 +123,7 @@ def build_common_payload(model: str, prompt: str) -> Dict[str, Any]:
     }
 
 
-def build_synthetic_payload(
+def build_cli_status_payload(
     model: str,
     prompt: str,
     session_id: str,
@@ -162,13 +164,6 @@ def build_synthetic_payload(
             separators=(",", ":"),
         )
     }
-    return payload
-
-
-def build_cli_compat_payload(model: str, prompt: str) -> Dict[str, Any]:
-    payload = build_common_payload(model, prompt)
-    payload["messages"] = [{"role": "user", "content": prompt}]
-    payload["system"] = CC_SYSTEM
     return payload
 
 
@@ -260,25 +255,9 @@ def parse_error_payload(status_code: int, body_text: str) -> Tuple[str, Optional
     return (message or f"HTTP {status_code}", raw_error_type)
 
 
-def default_probe_result(name: str, label: str, model: str, checked_at: str) -> Dict[str, Any]:
-    return {
-        "name": name,
-        "label": label,
-        "overall_status": "no_data",
-        "http_status": None,
-        "token_ok": False,
-        "last_token": "",
-        "latency_ms": None,
-        "checked_at": checked_at,
-        "error_message": "No checks yet",
-        "raw_error_type": None,
-        "target_model": model,
-    }
-
-
 def default_status() -> Dict[str, Any]:
     return {
-        "service_name": "Anyrouter Claude CLI Compatibility",
+        "service_name": "Anyrouter Claude CLI Status",
         "overall_status": "no_data",
         "http_status": None,
         "token_ok": False,
@@ -288,10 +267,7 @@ def default_status() -> Dict[str, Any]:
         "error_message": "No checks yet",
         "raw_error_type": None,
         "target_model": None,
-        "primary_probe": PRIMARY_PROBE,
-        "primary_probe_label": "CLI 兼容探针",
         "stale_after_seconds": STALE_AFTER_SECONDS,
-        "probes": {},
     }
 
 
@@ -325,6 +301,98 @@ def load_json(path: Path, fallback: Dict[str, Any]) -> Dict[str, Any]:
 def write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def run_claude_cli_probe(api_base: str, api_key: str, model: str, timeout: int, prompt: str, checked_at: str) -> Optional[Dict[str, Any]]:
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        return None
+
+    status = default_status()
+    status["checked_at"] = checked_at
+    status["target_model"] = model
+
+    with tempfile.TemporaryDirectory(prefix="anyrouter-claude-probe-") as tmpdir:
+        settings_path = Path(tmpdir) / "settings.json"
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "env": {
+                        "ANTHROPIC_AUTH_TOKEN": api_key,
+                        "ANTHROPIC_BASE_URL": api_base,
+                        "ANTHROPIC_MODEL": model,
+                        "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
+                        "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
+                        "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+                    },
+                    "model": model,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        started = time.monotonic()
+        try:
+            proc = subprocess.run(
+                [
+                    claude_bin,
+                    "-p",
+                    prompt,
+                    "--model",
+                    model,
+                    "--settings",
+                    str(settings_path),
+                    "--output-format",
+                    "json",
+                    "--permission-mode",
+                    "default",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            status["overall_status"] = "major_outage"
+            status["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
+            status["error_message"] = f"Claude CLI timed out after {timeout}s"
+            return status
+        except Exception as exc:
+            status["overall_status"] = "major_outage"
+            status["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
+            status["error_message"] = f"Claude CLI exec failed: {exc}"
+            return status
+
+    status["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
+
+    stdout = proc.stdout.strip()
+    stderr = proc.stderr.strip()
+    if proc.returncode != 0:
+        status["overall_status"] = "major_outage"
+        status["http_status"] = None
+        status["error_message"] = stderr or stdout or f"Claude CLI exited with code {proc.returncode}"
+        return status
+
+    try:
+        data = json.loads(stdout)
+    except ValueError as exc:
+        status["overall_status"] = "degraded"
+        status["error_message"] = f"Claude CLI returned invalid JSON: {exc}"
+        return status
+
+    status["http_status"] = data.get("api_error_status") or 200
+    result_text = str(data.get("result") or "").strip()
+    if not data.get("is_error") and result_text:
+        status["overall_status"] = "operational"
+        status["token_ok"] = True
+        status["last_token"] = preview_text(result_text)
+        status["error_message"] = ""
+        return status
+
+    status["overall_status"] = "major_outage"
+    status["error_message"] = str(data.get("result") or stderr or "Claude CLI probe failed").strip()
+    return status
 
 
 def merge_history(history: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
@@ -467,39 +535,23 @@ def execute_probe(
 
 def run_probe(api_base: str, api_key: str, model: str, timeout: int, prompt: str) -> Dict[str, Any]:
     checked_at = iso_z(utc_now())
+    cli_status = run_claude_cli_probe(api_base, api_key, model, timeout, prompt, checked_at)
+    if cli_status is not None:
+        return cli_status
+
     status = default_status()
     status["checked_at"] = checked_at
     status["target_model"] = model
 
     session_id, account_uuid, device_id = build_request_ids()
     headers, clean_model = build_headers(api_key, model, session_id)
-
-    synthetic = default_probe_result("synthetic", "合成探针", model, checked_at)
-    synthetic = execute_probe(
+    status = execute_probe(
         api_base,
         headers,
-        build_synthetic_payload(clean_model, prompt, session_id, account_uuid, device_id),
-        synthetic,
+        build_cli_status_payload(clean_model, prompt, session_id, account_uuid, device_id),
+        status,
         timeout,
     )
-
-    cli_compat = default_probe_result("cli_compat", "CLI 兼容探针", model, checked_at)
-    cli_compat = execute_probe(
-        api_base,
-        headers,
-        build_cli_compat_payload(clean_model, prompt),
-        cli_compat,
-        timeout,
-    )
-
-    status["probes"] = {
-        "cli_compat": cli_compat,
-        "synthetic": synthetic,
-    }
-
-    primary = status["probes"][PRIMARY_PROBE]
-    for key in ("overall_status", "http_status", "token_ok", "last_token", "latency_ms", "error_message", "raw_error_type"):
-        status[key] = primary.get(key)
     return status
 
 
@@ -562,7 +614,6 @@ def main() -> int:
                     "token_ok": snapshot["token_ok"],
                     "checked_at": snapshot["checked_at"],
                     "error_message": snapshot["error_message"],
-                    "primary_probe": snapshot["primary_probe"],
                 },
                 ensure_ascii=False,
             )

@@ -35,8 +35,15 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          npm install -g @anthropic-ai/claude-code@latest
 
       - name: Probe and persist data
         env:

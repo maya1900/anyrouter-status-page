@@ -106,43 +106,14 @@ function renderFreshness(status) {
   freshness.textContent = info.text;
 }
 
-function probeCard(probe) {
-  const status = probe.overall_status || "no_data";
-  return `
-    <article class="probe-card probe-${status}">
-      <div class="probe-card-head">
-        <strong>${probe.label || probe.name || "Unknown Probe"}</strong>
-        <span class="mini-pill mini-pill-${status}">${statusLabels[status] || statusLabels.no_data}</span>
-      </div>
-      <div class="probe-meta">
-        <span>HTTP ${probe.http_status ?? "-"}</span>
-        <span>${probe.token_ok ? "吐 token" : "未吐 token"}</span>
-        <span>${elapsedLabel(probe.latency_ms)}</span>
-      </div>
-      <code>${probe.error_message || probe.last_token || "-"}</code>
-    </article>
-  `;
-}
-
-function renderProbeMatrix(status) {
-  const node = document.getElementById("probeMatrix");
-  if (!node) return;
-  const probes = status.probes || {};
-  const entries = ["cli_compat", "synthetic"]
-    .filter((key) => probes[key])
-    .map((key) => probeCard(probes[key]));
-  node.innerHTML = entries.join("");
-}
-
 function fillStatus(status) {
   const probeStatus = status.overall_status || "no_data";
   setBanner(probeStatus);
   setPill(probeStatus);
   renderFreshness(status);
-  renderProbeMatrix(status);
   setText("lastUpdated", `Last checked: ${fmtDate(status.checked_at)}`);
-  setText("serviceName", status.service_name || "Anyrouter Claude CLI Compatibility");
-  setText("serviceSubLabel", `${status.primary_probe_label || "CLI 兼容探针"}（主状态）`);
+  setText("serviceName", status.service_name || "Anyrouter Claude CLI Status");
+  setText("serviceSubLabel", "Claude CLI 可用性探针");
   setText("httpStatus", status.http_status ?? "-");
   setText("tokenOk", status.token_ok ? "Yes" : "No");
   setText("latencyMs", elapsedLabel(status.latency_ms));
