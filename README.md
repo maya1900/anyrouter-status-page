@@ -66,20 +66,21 @@
    - `ANYROUTER_API_KEY`
    - `ANYROUTER_MODEL`
 3. 启用 Actions
-4. 使用 Cloudflare Worker 定时触发该 workflow 的 `workflow_dispatch`
+4. 使用 Cloudflare Worker 定时触发该 workflow 的 `repository_dispatch`
    - 当前线上配置为每 10 分钟触发一次
 
 ## 推荐触发方式
 
-如果你真的想要接近“每 10 分钟一次”的效果，别全指望 GitHub 自带 `schedule`。
+如果你真的想要接近“每 10 分钟一次”的效果，推荐只保留 Cloudflare Worker 作为自动触发器。
 
 推荐做法：
 
-- GitHub `schedule`
-  - 只当兜底
 - 外部定时器
   - 主用 `repository_dispatch`
   - Cloudflare Worker、Cron Job、或者你自己的服务器都行
+- GitHub Actions
+  - 只保留 `workflow_dispatch` 和 `repository_dispatch`
+  - 不再启用 GitHub 自带 `schedule`
 
 ### 1. GitHub 侧
 
@@ -89,8 +90,6 @@
   - 手动点按钮跑
 - `repository_dispatch`
   - 外部程序通过 GitHub API 触发
-- `schedule`
-  - GitHub 自己的 best-effort 定时
 
 ### 2. 最小 curl 触发
 
@@ -114,28 +113,51 @@ bash scripts/dispatch_repository_event.sh
 
 你需要的 token 权限至少要能触发仓库 workflow。
 
-### 3. Cloudflare Worker 示例
+### 3. Cloudflare Worker 部署
 
-仓库里还带了一个最小 Worker 示例：
+仓库里带了一个最小 Worker 示例：
 
 - `examples/cloudflare-worker.js`
 
-Worker 需要这些环境变量：
+部署步骤：
+
+1. 在 Cloudflare Dashboard 打开 `Workers & Pages`
+2. 创建一个新的 Worker
+3. 把 `examples/cloudflare-worker.js` 的内容粘进去
+4. 在 Worker 的 `Settings -> Variables` 里添加这些环境变量：
 
 - `GITHUB_TOKEN`
 - `GITHUB_OWNER`
 - `GITHUB_REPO`
 - `GITHUB_EVENT_TYPE`
 
-推荐把 Cron 设成：
+建议值：
+
+- `GITHUB_OWNER=maya1900`
+- `GITHUB_REPO=anyrouter-status-page`
+- `GITHUB_EVENT_TYPE=status-check`
+
+5. 在 Worker 的 `Triggers` 里添加一个 Cron Trigger
+
+推荐 Cron：
 
 - `*/10 * * * *`
+
+6. 保存并部署
 
 Worker 每次跑的时候会调用 GitHub：
 
 - `POST /repos/{owner}/{repo}/dispatches`
 
-### 4. 为什么不用外部程序去调 `workflow_dispatch`
+### 4. 如何测试 Worker
+
+测试方式：
+
+- 直接访问 Worker 的 URL
+  - 会立即触发一次 `repository_dispatch`
+- 去 GitHub Actions 页面确认是否出现新的 `repository_dispatch` 运行记录
+
+### 5. 为什么不用外部程序去调 `workflow_dispatch`
 
 `repository_dispatch` 更适合这种“外部系统定时踹一下仓库”的场景。
 
@@ -145,6 +167,21 @@ Worker 每次跑的时候会调用 GitHub：
 - 请求体更短
 - 不需要额外关心 `ref`
 - 你已经在 workflow 里显式支持了 `status-check`
+
+### 6. 不要和 GitHub schedule 同时开
+
+不建议让 Cloudflare Worker 和 GitHub `schedule` 同时跑。
+
+原因：
+
+- 会产生重复 workflow run
+- 会更频繁地产生 `chore(status)` 提交
+- 会让排队和触发来源更难排查
+
+当前仓库已经去掉了 GitHub `schedule`，默认只保留：
+
+- `workflow_dispatch`
+- `repository_dispatch`
 
 ## 说明
 

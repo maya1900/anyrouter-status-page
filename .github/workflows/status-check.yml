@@ -5,8 +5,6 @@ on:
   repository_dispatch:
     types:
       - status-check
-  schedule:
-    - cron: "*/10 * * * *"
 
 concurrency:
   group: anyrouter-status-check
