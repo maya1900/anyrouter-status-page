@@ -4,8 +4,8 @@
   "http_status": 200,
   "token_ok": true,
   "last_token": "A",
-  "latency_ms": 11404.22,
-  "checked_at": "2026-04-19T11:10:57Z",
+  "latency_ms": 12813.48,
+  "checked_at": "2026-04-19T11:14:04Z",
   "error_message": "",
   "raw_error_type": null,
   "target_model": "claude-opus-4-7[1m]",
@@ -16,7 +16,6 @@
   "console_user_quota": 47524902,
   "console_user_used_quota": 2475098,
   "console_user_request_count": 44,
-  "console_quota_per_unit": 50.0,
-  "console_display_in_currency": true,
+  "console_quota_per_dollar": 500000,
   "console_refresh_seconds": 3600
 }
