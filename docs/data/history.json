@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-20T05:30:50Z",
+  "generated_at": "2026-04-20T05:40:52Z",
   "window_hours": 168,
   "buckets": [
     {
@@ -202,10 +202,10 @@
     },
     {
       "hour": "2026-04-20T05:00:00Z",
-      "checks": 4,
+      "checks": 5,
       "successes": 0,
       "last_http_status": 429,
-      "avg_latency_ms": 1187.95,
+      "avg_latency_ms": 1164.21,
       "last_error_message": "Service Unavailable",
       "status": "major_outage"
     }
