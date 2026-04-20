@@ -129,6 +129,24 @@ h1 {
   gap: 20px;
 }
 
+.page-footer {
+  margin-top: 24px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.page-footer a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.page-footer a:hover {
+  color: var(--text);
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -349,7 +367,6 @@ code {
   .metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
 }
 
 @media (max-width: 560px) {
@@ -372,5 +389,9 @@ code {
 
   .uptime-grid {
     gap: 4px;
+  }
+
+  .page-footer {
+    font-size: 13px;
   }
 }
