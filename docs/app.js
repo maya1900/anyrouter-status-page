@@ -147,14 +147,12 @@ function fillConsoleStats(status) {
   const checkedAt = status.console_checked_at ? `Last fetched: ${fmtDate(status.console_checked_at)}` : "未配置";
   const refreshSeconds = Number(status.console_refresh_seconds || 3600);
   const refreshHours = Math.max(1, Math.round(refreshSeconds / 3600));
-  const signinAt = status.console_signin_last_success_at ? fmtDate(status.console_signin_last_success_at) : "-";
 
   setText("consoleCheckedAt", checkedAt);
-  setText("consoleHint", `账户额度每 ${refreshHours} 小时刷新一次，按后端展示口径换算：500000 quota = $1；每日 08:30（Asia/Shanghai）自动访问后台主页签到一次。`);
+  setText("consoleHint", `账户额度每 ${refreshHours} 小时刷新一次，按后端展示口径换算：500000 quota = $1。`);
   setText("consoleBalance", fmtQuota(status.console_user_quota, status));
   setText("consoleUsedQuota", fmtQuota(status.console_user_used_quota, status));
   setText("consoleRequestCount", fmtNumber(status.console_user_request_count));
-  setText("consoleSigninAt", signinAt);
 
   if (consoleStatus === "ok") {
     setText("consoleStatsStatus", "已连接");
@@ -166,40 +164,6 @@ function fillConsoleStats(status) {
     setText("consoleStatsStatus", "未配置");
     setText("consoleErrorMessage", status.console_error_message || "未提供 console session / user id");
   }
-
-  const signinStatus = status.console_signin_status || "disabled";
-  if (signinStatus === "ok") {
-    setText("consoleSigninStatus", "已签到");
-    setText("consoleSigninErrorMessage", "-");
-    return;
-  }
-
-  if (signinStatus === "error") {
-    setText("consoleSigninStatus", "失败");
-    setText("consoleSigninErrorMessage", status.console_signin_error_message || "-");
-    return;
-  }
-
-  if (signinStatus === "pending") {
-    setText("consoleSigninStatus", "待确认");
-    setText("consoleSigninErrorMessage", status.console_signin_error_message || "-");
-    return;
-  }
-
-  if (signinStatus === "not_due") {
-    setText("consoleSigninStatus", "未到时间");
-    setText("consoleSigninErrorMessage", "-");
-    return;
-  }
-
-  if (signinStatus === "waiting" || status.console_signin_checked_at) {
-    setText("consoleSigninStatus", "待签到");
-    setText("consoleSigninErrorMessage", "-");
-    return;
-  }
-
-  setText("consoleSigninStatus", "未配置");
-  setText("consoleSigninErrorMessage", status.console_signin_error_message || "未提供 console session");
 }
 
 function bucketTooltip(bucket) {

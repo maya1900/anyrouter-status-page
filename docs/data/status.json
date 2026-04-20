@@ -17,12 +17,5 @@
   "console_user_used_quota": 4595696,
   "console_user_request_count": 152,
   "console_quota_per_dollar": 500000,
-  "console_refresh_seconds": 3600,
-  "console_signin_status": "ok",
-  "console_signin_checked_at": "2026-04-20T00:31:02Z",
-  "console_signin_attempted_at": "2026-04-20T00:31:02Z",
-  "console_signin_last_success_at": "2026-04-20T03:40:53Z",
-  "console_signin_baseline_quota": 45406020,
-  "console_signin_awarded_quota": 12498284,
-  "console_signin_error_message": ""
+  "console_refresh_seconds": 3600
 }

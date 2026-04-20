@@ -68,7 +68,7 @@
               <h3>账户额度</h3>
               <span id="consoleCheckedAt" class="muted">未配置</span>
             </div>
-            <p id="consoleHint" class="subtle-note">账户额度每小时刷新一次，并在每天 08:30 自动访问后台主页完成一次签到。</p>
+            <p id="consoleHint" class="subtle-note">账户额度每小时刷新一次，按后端展示口径换算为美元显示。</p>
             <div class="metrics account-metrics">
               <div class="metric">
                 <span class="metric-label">当前余额</span>
@@ -86,22 +86,10 @@
                 <span class="metric-label">Console 采集</span>
                 <strong id="consoleStatsStatus">-</strong>
               </div>
-              <div class="metric">
-                <span class="metric-label">每日签到</span>
-                <strong id="consoleSigninStatus">-</strong>
-              </div>
-              <div class="metric">
-                <span class="metric-label">上次签到</span>
-                <strong id="consoleSigninAt">-</strong>
-              </div>
             </div>
             <div>
               <span class="detail-label">额度采集错误</span>
               <code id="consoleErrorMessage">-</code>
-            </div>
-            <div>
-              <span class="detail-label">签到错误</span>
-              <code id="consoleSigninErrorMessage">-</code>
             </div>
           </div>
         </article>

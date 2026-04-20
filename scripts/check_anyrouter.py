@@ -27,10 +27,6 @@ WINDOW_HOURS = 24 * 7
 STALE_AFTER_SECONDS = 20 * 60
 CONSOLE_REFRESH_SECONDS = 60 * 60
 CONSOLE_QUOTA_PER_DOLLAR = 500_000
-SHANGHAI_TZ = timezone(timedelta(hours=8))
-CONSOLE_SIGNIN_HOUR = 8
-CONSOLE_SIGNIN_MINUTE = 30
-CONSOLE_SIGNIN_VERIFY_WAIT_SECONDS = 8
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "docs" / "data"
 STATUS_PATH = DATA_DIR / "status.json"
@@ -285,13 +281,6 @@ def default_status() -> Dict[str, Any]:
         "console_user_request_count": None,
         "console_quota_per_dollar": CONSOLE_QUOTA_PER_DOLLAR,
         "console_refresh_seconds": CONSOLE_REFRESH_SECONDS,
-        "console_signin_status": "disabled",
-        "console_signin_checked_at": None,
-        "console_signin_attempted_at": None,
-        "console_signin_last_success_at": None,
-        "console_signin_baseline_quota": None,
-        "console_signin_awarded_quota": None,
-        "console_signin_error_message": "",
     }
 
 
@@ -336,15 +325,6 @@ def derive_console_base(api_base: str) -> str:
     if parsed.scheme and parsed.netloc:
         return f"{parsed.scheme}://{parsed.netloc}"
     return api_base.rstrip("/")
-
-
-def shanghai_now() -> datetime:
-    return datetime.now(SHANGHAI_TZ)
-
-
-def console_signin_due(now_dt: Optional[datetime] = None) -> datetime:
-    current = now_dt.astimezone(SHANGHAI_TZ) if now_dt else shanghai_now()
-    return current.replace(hour=CONSOLE_SIGNIN_HOUR, minute=CONSOLE_SIGNIN_MINUTE, second=0, microsecond=0)
 
 
 def solve_acw_sc_v2(challenge_html: str) -> Optional[str]:
@@ -486,165 +466,6 @@ def enrich_console_stats(
     snapshot.update(stats)
     snapshot["console_quota_per_dollar"] = CONSOLE_QUOTA_PER_DOLLAR
     snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
-    return snapshot
-
-
-def carry_console_signin(snapshot: Dict[str, Any], previous_status: Dict[str, Any]) -> Dict[str, Any]:
-    for key in [
-        "console_signin_status",
-        "console_signin_checked_at",
-        "console_signin_attempted_at",
-        "console_signin_last_success_at",
-        "console_signin_baseline_quota",
-        "console_signin_awarded_quota",
-        "console_signin_error_message",
-    ]:
-        snapshot[key] = previous_status.get(key, snapshot.get(key))
-    return snapshot
-
-
-def parse_iso_dt(value: Any) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except Exception:
-        return None
-
-
-def normalize_console_signin(snapshot: Dict[str, Any], previous_status: Dict[str, Any], now_dt: Optional[datetime] = None) -> Dict[str, Any]:
-    current = now_dt.astimezone(SHANGHAI_TZ) if now_dt else shanghai_now()
-    due_at = console_signin_due(current)
-
-    snapshot = carry_console_signin(snapshot, previous_status)
-    last_success_dt = parse_iso_dt(snapshot.get("console_signin_last_success_at"))
-    last_checked_dt = parse_iso_dt(snapshot.get("console_signin_checked_at"))
-    last_success_local = last_success_dt.astimezone(SHANGHAI_TZ) if last_success_dt else None
-    last_checked_local = last_checked_dt.astimezone(SHANGHAI_TZ) if last_checked_dt else None
-
-    if current < due_at:
-        snapshot["console_signin_status"] = "not_due"
-        snapshot["console_signin_error_message"] = ""
-        snapshot["console_signin_awarded_quota"] = None
-        snapshot["console_signin_checked_at"] = snapshot["checked_at"]
-        return snapshot
-
-    if last_success_local and last_success_local.date() == current.date():
-        snapshot["console_signin_status"] = "ok"
-        snapshot["console_signin_error_message"] = ""
-        return snapshot
-
-    attempted_dt = parse_iso_dt(snapshot.get("console_signin_attempted_at"))
-    attempted_local = attempted_dt.astimezone(SHANGHAI_TZ) if attempted_dt else None
-    if attempted_local and attempted_local.date() == current.date() and attempted_local >= due_at:
-        if snapshot.get("console_signin_status") == "pending":
-            return snapshot
-
-    if (
-        snapshot.get("console_signin_status") == "error"
-        and last_checked_local
-        and last_checked_local.date() == current.date()
-        and last_checked_local >= due_at
-    ):
-        return snapshot
-
-    snapshot["console_signin_status"] = "waiting"
-    snapshot["console_signin_error_message"] = ""
-    snapshot["console_signin_awarded_quota"] = None
-    snapshot["console_signin_checked_at"] = snapshot["checked_at"]
-    return snapshot
-
-
-def should_run_console_signin(previous_status: Dict[str, Any], now_dt: Optional[datetime] = None) -> bool:
-    current = now_dt.astimezone(SHANGHAI_TZ) if now_dt else shanghai_now()
-    due_at = console_signin_due(current)
-    if current < due_at:
-        return False
-
-    attempted_dt = parse_iso_dt(previous_status.get("console_signin_attempted_at"))
-    if attempted_dt:
-        attempted_local = attempted_dt.astimezone(SHANGHAI_TZ)
-        if attempted_local.date() == current.date():
-            return False
-
-    last_success_dt = parse_iso_dt(previous_status.get("console_signin_last_success_at"))
-    if not last_success_dt:
-        return True
-    success_dt = last_success_dt.astimezone(SHANGHAI_TZ)
-    return success_dt.date() != current.date()
-
-
-def resolve_console_signin_from_quota(snapshot: Dict[str, Any], now_dt: Optional[datetime] = None) -> Dict[str, Any]:
-    current = now_dt.astimezone(SHANGHAI_TZ) if now_dt else shanghai_now()
-    due_at = console_signin_due(current)
-    if current < due_at:
-        snapshot["console_signin_status"] = "not_due"
-        snapshot["console_signin_error_message"] = ""
-        snapshot["console_signin_awarded_quota"] = None
-        return snapshot
-
-    baseline_quota = snapshot.get("console_signin_baseline_quota")
-    current_quota = snapshot.get("console_user_quota")
-    if baseline_quota is None or current_quota is None:
-        return snapshot
-
-    try:
-        baseline_value = int(baseline_quota)
-        current_value = int(current_quota)
-    except Exception:
-        return snapshot
-
-    if current_value > baseline_value:
-        snapshot["console_signin_status"] = "ok"
-        snapshot["console_signin_last_success_at"] = snapshot.get("console_checked_at") or snapshot.get("checked_at")
-        snapshot["console_signin_awarded_quota"] = current_value - baseline_value
-        snapshot["console_signin_error_message"] = ""
-        return snapshot
-
-    if snapshot.get("console_signin_status") == "pending":
-        snapshot["console_signin_awarded_quota"] = 0
-        if not snapshot.get("console_signin_error_message"):
-            snapshot["console_signin_error_message"] = "已触发签到，等待额度增加确认"
-    return snapshot
-
-
-def run_console_signin(
-    snapshot: Dict[str, Any],
-    console_base: str,
-    session_cookie: str,
-    timeout: int,
-    user_id: Optional[int],
-    previous_status: Dict[str, Any],
-) -> Dict[str, Any]:
-    checked_at = iso_z(utc_now())
-    snapshot["console_signin_checked_at"] = checked_at
-    snapshot["console_signin_attempted_at"] = checked_at
-    snapshot["console_signin_error_message"] = ""
-    snapshot["console_signin_awarded_quota"] = None
-    snapshot["console_signin_baseline_quota"] = previous_status.get("console_user_quota")
-
-    session = create_console_session(console_base, session_cookie)
-    try:
-        bootstrap_console_session(session, console_base, timeout)
-    except Exception as exc:
-        snapshot["console_signin_status"] = "error"
-        snapshot["console_signin_error_message"] = f"Console sign-in failed: {type(exc).__name__}: {exc}"
-        return snapshot
-
-    if user_id is None:
-        snapshot["console_signin_status"] = "pending"
-        snapshot["console_signin_error_message"] = "已访问后台主页，等待后续额度变化确认签到结果"
-        return snapshot
-
-    wait_seconds = min(CONSOLE_SIGNIN_VERIFY_WAIT_SECONDS, max(1, timeout))
-    time.sleep(wait_seconds)
-    stats = fetch_console_user_self_with_session(session, console_base, user_id, timeout)
-    snapshot.update(stats)
-    snapshot["console_quota_per_dollar"] = CONSOLE_QUOTA_PER_DOLLAR
-    snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
-    snapshot["console_signin_status"] = "pending"
-    snapshot["console_signin_error_message"] = "已触发签到，等待额度增加确认"
-    snapshot = resolve_console_signin_from_quota(snapshot)
     return snapshot
 
 
@@ -825,7 +646,6 @@ def run_probe(
     previous_status: Dict[str, Any],
 ) -> Dict[str, Any]:
     checked_at = iso_z(utc_now())
-    current_local = shanghai_now()
     status = default_status()
     status["checked_at"] = checked_at
     status["target_model"] = model
@@ -840,45 +660,16 @@ def run_probe(
         timeout,
     )
 
-    if console_session:
-        snapshot = normalize_console_signin(snapshot, previous_status, current_local)
-        sign_in_ran = False
-
-        if should_run_console_signin(previous_status, current_local):
-            sign_in_ran = True
-            snapshot = run_console_signin(
-                snapshot,
-                console_base,
-                console_session,
-                timeout,
-                console_user_id,
-                previous_status,
-            )
-
-        if console_user_id is not None:
-            if sign_in_ran:
-                return resolve_console_signin_from_quota(snapshot, current_local)
-            force_console_refresh = snapshot.get("console_signin_status") == "pending"
-            if not should_refresh_console(previous_status, snapshot["checked_at"]) and not force_console_refresh:
-                return carry_console_stats(snapshot, previous_status)
-            snapshot = enrich_console_stats(snapshot, console_base, console_session, console_user_id, timeout)
-            return resolve_console_signin_from_quota(snapshot, current_local)
-
-        snapshot["console_stats_status"] = "disabled"
-        snapshot["console_checked_at"] = snapshot["checked_at"]
-        snapshot["console_quota_per_dollar"] = CONSOLE_QUOTA_PER_DOLLAR
-        snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
-        snapshot["console_error_message"] = "未提供 console user id，已跳过额度采集"
-        return snapshot
+    if console_session and console_user_id is not None:
+        if not should_refresh_console(previous_status, snapshot["checked_at"]):
+            return carry_console_stats(snapshot, previous_status)
+        return enrich_console_stats(snapshot, console_base, console_session, console_user_id, timeout)
 
     snapshot["console_stats_status"] = "disabled"
     snapshot["console_checked_at"] = snapshot["checked_at"]
     snapshot["console_quota_per_dollar"] = CONSOLE_QUOTA_PER_DOLLAR
     snapshot["console_refresh_seconds"] = CONSOLE_REFRESH_SECONDS
-    snapshot["console_error_message"] = "未提供 console session，已跳过额度采集"
-    snapshot["console_signin_status"] = "disabled"
-    snapshot["console_signin_checked_at"] = snapshot["checked_at"]
-    snapshot["console_signin_error_message"] = "未提供 console session，已跳过每日签到"
+    snapshot["console_error_message"] = "未提供 console session / user id，已跳过额度采集"
     return snapshot
 
 

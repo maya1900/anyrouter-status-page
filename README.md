@@ -21,8 +21,6 @@
   - 当前余额
   - 历史消耗
   - 请求次数
-  - 每天 08:30（Asia/Shanghai）自动访问后台主页签到一次
-  - 签到后会短暂等待，并按额度是否增加来确认是否成功
   - 采集失败时会直接显示错误
   - 默认每 1 小时刷新一次
   - 页面按后端展示口径换算金额：`500000 quota = $1`
@@ -130,7 +128,7 @@ bash scripts/dispatch_repository_event.sh
 
 你需要的 token 权限至少要能触发仓库 workflow。
 
-### 3. Cloudflare Worker 部署
+### 3. Cloudflare Worker 部署（状态探针）
 
 仓库里带了一个最小 Worker 示例：
 
@@ -166,7 +164,53 @@ Worker 每次跑的时候会调用 GitHub：
 
 - `POST /repos/{owner}/{repo}/dispatches`
 
-### 4. 如何测试 Worker
+### 4. Cloudflare Worker 部署（独立签到）
+
+如果你要每天自动签到，不要再走状态页脚本里的旧方案，单独部署一个签到 Worker：
+
+- `examples/anyrouter-signin-worker.js`
+
+这个 Worker 会直接调用：
+
+- `POST /api/user/sign_in`
+
+部署步骤：
+
+1. 在 Cloudflare Dashboard 新建第二个 Worker
+2. 把 `examples/anyrouter-signin-worker.js` 的内容粘进去
+3. 在 `Settings -> Variables` 里添加：
+
+- `COOKIES`
+- `BASE_URL`
+- `TG_BOT_TOKEN`（可选）
+- `TG_CHAT_ID`（可选）
+- `RUN_TOKEN`（可选）
+
+推荐值：
+
+- `BASE_URL=https://anyrouter.top`
+
+`COOKIES` 支持两种格式：
+
+- 换行分隔多个 `session` 值
+- JSON 数组，例如 `["session1","session2"]`
+
+推荐 Cron：
+
+- `30 0 * * *`
+  - 对应北京时间每天 `08:30`
+
+手动测试：
+
+- 访问 Worker 的 `/run`
+- 如果配置了 `RUN_TOKEN`，用 `?token=xxx` 或 `Authorization: Bearer xxx`
+
+这个签到 Worker 和状态探针 Worker 是两套独立自动化：
+
+- 状态探针 Worker：每 10 分钟触发 GitHub Actions 更新页面
+- 签到 Worker：每天 08:30 直接调用签到接口
+
+### 5. 如何测试 Worker
 
 测试方式：
 
@@ -174,7 +218,7 @@ Worker 每次跑的时候会调用 GitHub：
   - 会立即触发一次 `repository_dispatch`
 - 去 GitHub Actions 页面确认是否出现新的 `repository_dispatch` 运行记录
 
-### 5. 为什么不用外部程序去调 `workflow_dispatch`
+### 6. 为什么不用外部程序去调 `workflow_dispatch`
 
 `repository_dispatch` 更适合这种“外部系统定时踹一下仓库”的场景。
 
@@ -185,7 +229,7 @@ Worker 每次跑的时候会调用 GitHub：
 - 不需要额外关心 `ref`
 - 你已经在 workflow 里显式支持了 `status-check`
 
-### 6. 不要和 GitHub schedule 同时开
+### 7. 不要和 GitHub schedule 同时开
 
 不建议让 Cloudflare Worker 和 GitHub `schedule` 同时跑。
 
