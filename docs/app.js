@@ -132,7 +132,7 @@ function fillStatus(status) {
   renderFreshness(status);
   setText("lastUpdated", `Last checked: ${fmtDate(status.checked_at)}`);
   setText("serviceName", status.service_name || "Anyrouter API Status");
-  setText("serviceSubLabel", "轻量 API 可用性探针");
+  setText("serviceSubLabel", "轻量 API 可用性检测");
   setText("httpStatus", status.http_status ?? "-");
   setText("tokenOk", status.token_ok ? "Yes" : "No");
   setText("latencyMs", elapsedLabel(status.latency_ms));

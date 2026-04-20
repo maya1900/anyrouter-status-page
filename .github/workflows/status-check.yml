@@ -57,7 +57,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           attempt=1
-          max_attempts=3
+          max_attempts=1
 
           while [ "$attempt" -le "$max_attempts" ]; do
             echo "Publish attempt $attempt/$max_attempts"
@@ -80,7 +80,7 @@ jobs:
               break
             fi
 
-            echo "Push failed; retrying on top of the latest origin/main"
+            echo "Push failed; stop here and wait for the next scheduled run"
             attempt=$((attempt + 1))
           done
 
