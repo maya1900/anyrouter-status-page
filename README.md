@@ -129,9 +129,9 @@ bash scripts/dispatch_repository_event.sh
 
 你需要的 token 权限至少要能触发仓库 workflow。
 
-### 3. Cloudflare Worker 部署（状态探针）
+### 3. Cloudflare Worker 部署（状态探针，随机分布版）
 
-仓库里带了一个最小 Worker 示例：
+仓库里带了一个随机分布版 Worker 示例：
 
 - `examples/cloudflare-worker.js`
 
@@ -146,22 +146,46 @@ bash scripts/dispatch_repository_event.sh
 - `GITHUB_OWNER`
 - `GITHUB_REPO`
 - `GITHUB_EVENT_TYPE`
+- `TARGET_RUNS_PER_DAY`
+- `WINDOW_START_HOUR`
+- `WINDOW_END_HOUR`
+- `SLOT_MINUTES`
+- `TIMEZONE`
+
+5. 在 Worker 的 `Settings -> Bindings` 里添加一个 KV Namespace：
+
+- `STATE_STORE`
 
 建议值：
 
 - `GITHUB_OWNER=maya1900`
 - `GITHUB_REPO=anyrouter-status-page`
 - `GITHUB_EVENT_TYPE=status-check`
+- `TARGET_RUNS_PER_DAY=8`
+- `WINDOW_START_HOUR=8`
+- `WINDOW_END_HOUR=23`
+- `SLOT_MINUTES=30`
+- `TIMEZONE=Asia/Shanghai`
 
-5. 在 Worker 的 `Triggers` 里添加一个 Cron Trigger
+6. 在 Worker 的 `Triggers` 里添加一个 Cron Trigger
 
 推荐 Cron：
 
 - `*/30 * * * *`
 
-6. 保存并部署
+这条 Cron 只是固定唤醒频率，真正是否触发 GitHub Actions 由 Worker 在运行时随机决定。
 
-Worker 每次跑的时候会调用 GitHub：
+7. 保存并部署
+
+这个 Worker 会：
+
+- 每 30 分钟醒一次
+- 只在设定时间窗内参与调度
+- 用 KV 记录“今天已经触发了几次”
+- 按剩余次数 / 剩余时间窗做随机决策
+- 尽量把每天执行次数控制在 `TARGET_RUNS_PER_DAY`
+
+真正执行时才会调用 GitHub：
 
 - `POST /repos/{owner}/{repo}/dispatches`
 
@@ -208,15 +232,17 @@ Worker 每次跑的时候会调用 GitHub：
 
 这个签到 Worker 和状态探针 Worker 是两套独立自动化：
 
-- 状态探针 Worker：每 30 分钟触发 GitHub Actions 更新页面
+- 状态探针 Worker：每 30 分钟醒一次，但每天只随机触发少量 `repository_dispatch`
 - 签到 Worker：每天 08:30 直接调用签到接口
 
 ### 5. 如何测试 Worker
 
 测试方式：
 
-- 直接访问 Worker 的 URL
-  - 会立即触发一次 `repository_dispatch`
+- 直接访问 Worker 的 `/run`
+  - 强制触发一次 `repository_dispatch`
+- 直接访问 Worker 的 `/decide`
+  - 查看当前时刻按随机策略是否会触发
 - 去 GitHub Actions 页面确认是否出现新的 `repository_dispatch` 运行记录
 
 ### 6. 为什么不用外部程序去调 `workflow_dispatch`
